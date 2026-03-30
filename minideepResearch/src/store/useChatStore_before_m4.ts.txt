@@ -1,0 +1,41 @@
+import { create } from "zustand";
+
+export interface Message {
+  role: "user" | "ai";
+  content: string;
+  id: string;
+}
+
+interface ChatState {
+  messages: Message[];
+  isLoading: boolean;
+  input: string;
+
+  setInput: (val: string) => void;
+  setLoading: (status: boolean) => void;
+  addMessage: (msg: Message) => void;
+  updateLastMessage: (content: string) => void; // 用于流式更新最后一条消息
+}
+
+export const useChatStore = create<ChatState>((set) => ({
+  messages: [],
+  isLoading: false,
+  input: "",
+
+  setInput: (val) => set({ input: val }),
+  setLoading: (status) => set({ isLoading: status }),
+
+  addMessage: (msg) => set((state) => ({
+    messages: [...state.messages, msg]
+  })),
+
+  // 核心逻辑：打字机效果就是靠不断追加最后一条消息的内容实现的
+  updateLastMessage: (content) => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.role === "ai") {
+      lastMsg.content += content;
+    }
+    return { messages: msgs };
+  }),
+}));

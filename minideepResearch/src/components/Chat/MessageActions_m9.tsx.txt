@@ -1,0 +1,85 @@
+import { Copy, Check, Download, RotateCw } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+// 👇 1. 引入正式的工具函数
+import { copyDualFormat } from "@/lib/clipboardUtils";
+
+interface Props {
+  content: string;
+  isUser: boolean;
+  onRegenerate?: () => void;
+}
+
+export default function MessageActions({ content, isUser, onRegenerate }: Props) {
+  const [copied, setCopied] = useState(false);
+
+  // 👇 2. 正式的复制处理逻辑
+  const handleCopy = async () => {
+    try {
+      // 执行智能双模复制
+      const success = await copyDualFormat(content);
+
+      setCopied(true);
+
+      if (success) {
+        // 成功提示
+        toast.success("已复制 (Word/富文本格式优化)");
+      } else {
+        // 降级提示
+        toast.warning("复制成功 (纯文本模式)");
+      }
+
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      console.error("Copy failed", e);
+      toast.error("复制失败");
+    }
+  };
+
+  const handleDownload = () => {
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `deep-research-report-${Date.now()}.md`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("报告已下载");
+  };
+
+  return (
+    <div className={`flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity ${isUser ? "justify-end text-blue-100" : "justify-start text-gray-400"}`}>
+      {/* 复制按钮 */}
+      <button
+        onClick={handleCopy}
+        className="p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-colors"
+        title="智能复制 (支持 Word/Markdown)" // 更新提示文字
+      >
+        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+
+      {/* 下载按钮 (仅 AI 消息) */}
+      {!isUser && (
+        <button
+            onClick={handleDownload}
+            className="p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-colors"
+            title="下载 Markdown 文件"
+        >
+            <Download className="w-3.5 h-3.5" />
+        </button>
+      )}
+
+      {/* 重新生成按钮 */}
+      {!isUser && onRegenerate && (
+        <button
+          onClick={onRegenerate}
+          className="p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-colors"
+          title="重新生成"
+        >
+          <RotateCw className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}

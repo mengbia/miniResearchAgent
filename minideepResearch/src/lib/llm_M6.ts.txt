@@ -1,0 +1,37 @@
+// import "dotenv/config"; // 确保环境变量加载
+import { ChatOpenAI } from "@langchain/openai";
+
+export const createLLM = () => {
+  // 1. 获取配置
+  const apiKey = process.env.OPENAI_QWEN_API_KEY || process.env.OPENAI_API_KEY;
+  const baseURL = process.env.OPENAI_QWEN_BASE_URL || process.env.OPENAI_API_BASE;
+  const modelName = process.env.OPENAI_MODEL_NAME || "qwen-plus";
+
+  if (!apiKey) {
+    throw new Error("❌ 未找到 API Key，请检查 .env 文件");
+  }
+
+  // 🔍 调试日志 (运行成功后可删除)
+  // 这能帮我们确认 LangChain 到底接收到了什么
+  console.log("🔧 初始化 LLM:");
+  console.log("   - Model:", modelName);
+  console.log("   - BaseURL:", baseURL);
+  console.log("   - Key:", apiKey.slice(0, 5) + "..." + apiKey.slice(-3));
+
+  // 2. 初始化 ChatOpenAI
+  // 核心修改：不再使用 openAIApiKey 别名，而是直接通过 configuration 传递给底层的 OpenAI Client
+  return new ChatOpenAI({
+    modelName: modelName, // 模型名称
+    temperature: 0,       // 温度
+    streaming: true,      // 开启流式
+
+    // 👇 关键修改：直接配置底层的 OpenAI SDK 选项
+    configuration: {
+      apiKey: apiKey,     // 强制在这里传入 Key
+      baseURL: baseURL,   // 强制在这里传入 BaseURL
+    },
+
+    // 同时也传入顶层属性作为双重保险
+    apiKey: apiKey,
+  });
+};

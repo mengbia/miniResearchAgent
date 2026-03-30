@@ -1,0 +1,244 @@
+"use client";
+
+import { useRef, useEffect } from "react";
+import { nanoid } from "nanoid";
+import { useChatStore } from "@/store/useChatStore";
+import ChatMessage from "@/components/Chat/ChatMessage";
+import Sidebar from "@/components/Sidebar/Sidebar";
+
+export default function Home() {
+  const {
+    messages,
+    input,
+    isLoading,
+    currentChatId,
+    setInput,
+    addMessage,
+    setLoading,
+    updateLastMessage,
+    addStepToLastMessage,
+    completeLastStep,
+    setCurrentChatId,
+    setChats,
+    setSourcesForLastMessage, // M6.1 新增
+    deleteLastMessage         // M6.1 新增
+  } = useChatStore();
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 自动滚动到底部 (使用 scrollTo 避免全屏滚动穿透)
+  useEffect(() => {
+    if (scrollRef.current) {
+      const div = scrollRef.current;
+      div.scrollTo({
+        top: div.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [messages, messages.flatMap(m => m.steps)]);
+
+  // 🔄 处理重新生成逻辑
+  const handleRegenerate = async () => {
+    if (isLoading) return;
+
+    // 1. 获取倒数第二条消息（应该是用户的最后一条提问）
+    const msgs = useChatStore.getState().messages;
+    if (msgs.length < 2) return;
+
+    const lastUserMsg = msgs[msgs.length - 2];
+    if (lastUserMsg.role !== "user") return;
+
+    // 2. 在前端状态中删除最后一条 AI 消息
+    deleteLastMessage();
+
+    // 3. 把用户内容填回输入框 (可选，保持状态一致)
+    setInput(lastUserMsg.content);
+
+    // 4. 触发发送逻辑 (传入内容，视为重新生成)
+    // 使用 setTimeout 确保状态更新完成后再执行请求
+    setTimeout(() => handleSend(lastUserMsg.content), 0);
+  };
+
+  // 📩 发送处理逻辑
+  const handleSend = async (manualContent?: string) => {
+    const contentToSend = manualContent || input;
+    if (!contentToSend.trim() || isLoading) return;
+
+    // 判断是否是重新生成
+    const isRegenerate = !!manualContent;
+
+    // 🌟 关键修改：如果不是重新生成，才在 UI 上添加用户消息
+    // (如果是重新生成，屏幕上已经有那条用户消息了，不需要重复添加)
+    if (!isRegenerate) {
+       setInput("");
+       addMessage({ role: "user", content: contentToSend, id: nanoid() });
+    }
+
+    setLoading(true);
+
+    // 预占位 AI 消息
+    addMessage({ role: "ai", content: "", id: nanoid() });
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: contentToSend,
+          chatId: currentChatId,
+          isRegenerate // 👈 告诉后端这是重新生成，不要在数据库重复插入 User 消息
+        }),
+      });
+
+      if (!response.ok) throw new Error(response.statusText);
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) return;
+
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
+
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const jsonStr = line.slice(6);
+              if (!jsonStr.trim()) continue;
+
+              const data = JSON.parse(jsonStr);
+
+              // === 事件分发 ===
+              if (data.type === "text") {
+                updateLastMessage(data.content);
+              }
+              else if (data.type === "tool_start") {
+                addStepToLastMessage({
+                    id: nanoid(),
+                    type: "search",
+                    content: `正在搜索: ${data.content.input?.query || "相关信息"}...`,
+                    status: "pending"
+                });
+              }
+              else if (data.type === "tool_end") {
+                completeLastStep();
+              }
+              // M6.1 处理来源
+              else if (data.type === "sources") {
+                setSourcesForLastMessage(data.content);
+              }
+              else if (data.type === "chat_id") {
+                const newId = data.content;
+                if (newId !== currentChatId) {
+                  setCurrentChatId(newId);
+                  fetch("/api/history")
+                    .then(res => res.json())
+                    .then(chats => setChats(chats));
+                }
+              }
+
+            } catch (e) {
+              console.error("解析错误:", e);
+            }
+          }
+        }
+      }
+
+    } catch (error) {
+      console.error("请求失败:", error);
+      updateLastMessage("\n\n❌ 网络请求错误，请检查 API Key 或网络连接。");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex h-screen bg-gray-50 dark:bg-black text-gray-900 dark:text-gray-100 overflow-hidden">
+
+      {/* 左侧：侧边栏 */}
+      <div className="hidden md:flex h-full flex-col">
+        <Sidebar />
+      </div>
+
+      {/* 右侧：主聊天区域 */}
+      <main className="flex-1 flex flex-col h-full relative min-w-0">
+
+        {/* 顶部标题栏 */}
+        <header className="flex items-center justify-center py-4 border-b dark:border-gray-800 bg-white dark:bg-gray-900 shadow-sm z-10 shrink-0">
+          <h1 className="text-lg font-bold">Mini DeepResearch</h1>
+        </header>
+
+        {/* 消息滚动区 */}
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto p-4 md:p-6 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-700"
+        >
+          <div className="max-w-3xl mx-auto space-y-6">
+
+            {messages.length === 0 && (
+              <div className="text-center mt-32 space-y-4">
+                <h2 className="text-2xl font-bold text-gray-700 dark:text-gray-200">
+                  你想研究什么？
+                </h2>
+                <p className="text-gray-500">
+                  支持联网深度搜索、即时数据分析与整合。
+                </p>
+              </div>
+            )}
+
+            {messages.map((msg, index) => (
+              <ChatMessage
+                key={msg.id}
+                message={msg}
+                // 只有当这是最后一条 AI 消息时，才允许重新生成
+                onRegenerate={
+                  (index === messages.length - 1 && msg.role === "ai")
+                    ? handleRegenerate
+                    : undefined
+                }
+              />
+            ))}
+
+            <div className="h-4" />
+          </div>
+        </div>
+
+        {/* 底部输入框 */}
+        <div className="p-4 bg-white dark:bg-gray-900 border-t dark:border-gray-800 shrink-0">
+          <div className="max-w-3xl mx-auto flex gap-3">
+            <input
+              type="text"
+              className="flex-1 p-3.5 bg-gray-100 dark:bg-gray-800 border-0 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
+              placeholder="输入问题，例如：分析一下英伟达最新的财报..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              // 注意这里调用 handleSend 时不传参，避免 event 对象传入
+              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              disabled={isLoading}
+            />
+            <button
+              // 同理，显式调用无参
+              onClick={() => handleSend()}
+              disabled={isLoading || !input.trim()}
+              className="px-6 py-3.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium transition-colors shadow-lg shadow-blue-600/20"
+            >
+              {isLoading ? "研究中..." : "发送"}
+            </button>
+          </div>
+          <p className="text-center text-xs text-gray-400 mt-3">
+            Powered by LangGraph & Tavily & Qwen
+          </p>
+        </div>
+      </main>
+    </div>
+  );
+}

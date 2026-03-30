@@ -1,0 +1,196 @@
+import { NextRequest, NextResponse } from "next/server";
+import { HumanMessage } from "@langchain/core/messages";
+import { graph } from "@/agents/graph";
+import { prisma } from "@/lib/prisma";
+
+export const runtime = "nodejs";
+
+export async function POST(req: NextRequest) {
+  try {
+    // 1. 解析请求，新增 isRegenerate 参数
+    const { message, chatId, isRegenerate } = await req.json();
+
+    let currentChatId = chatId;
+    if (!currentChatId) {
+      const newChat = await prisma.chat.create({
+        data: { title: message.slice(0, 30) },
+      });
+      currentChatId = newChat.id;
+    }
+
+    // 🌟 2. 核心逻辑分支：处理重新生成 vs 新消息
+    if (isRegenerate) {
+      // 🔄 如果是重新生成：
+      // A. 找到并删除该会话最后一条消息 (应该是旧的 AI 回答)
+      const lastMsg = await prisma.message.findFirst({
+        where: { chatId: currentChatId },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      // 只有当最后一条是 AI 发的时才删除 (防止误删用户消息)
+      if (lastMsg && lastMsg.role === 'ai') {
+        await prisma.message.delete({
+          where: { id: lastMsg.id }
+        });
+      }
+
+      // B. 关键点：跳过 prisma.message.create({ role: "user" })
+      // 因为前端只是想重试最后一次对话，数据库里已经有那个 User Message 了
+    } else {
+      // 🆕 如果是普通发送：
+      // 照常保存用户消息
+      await prisma.message.create({
+        data: {
+          content: message,
+          role: "user",
+          chatId: currentChatId,
+        },
+      });
+    }
+
+    // 3. 开启流式响应
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+
+        // 🌟 变量定义：用于最后存库
+        let fullAiResponse = "";
+        let collectedSources: any[] = []; // 用于收集来源
+
+        const sendData = (type: string, content: any) => {
+          const json = JSON.stringify({ type, content });
+          controller.enqueue(encoder.encode(`data: ${json}\n\n`));
+        };
+
+        // 发送 chatId 给前端
+        sendData("chat_id", currentChatId);
+
+        try {
+          const eventStream = await graph.streamEvents(
+            { messages: [new HumanMessage(message)] },
+            { version: "v2" }
+          );
+
+          for await (const event of eventStream) {
+            // A. 工具开始
+            if (event.event === "on_tool_start" && event.name === "search_web") {
+              sendData("tool_start", { tool: event.name, input: event.data.input });
+            }
+
+            // B. 工具结束 (🌟 核心解析逻辑)
+            if (event.event === "on_tool_end" && event.name === "search_web") {
+              const rawOutput = event.data.output;
+
+              // 通知前端工具已结束
+              sendData("tool_end", { tool: event.name, output: "搜索完成" });
+
+              try {
+                let cleanContent = "";
+
+                // === 🛠️ 步骤 1: 强力拆包 (解决 JSON 套壳问题) ===
+                if (typeof rawOutput === 'string') {
+                    try {
+                        // 判断是否像 JSON
+                        if (rawOutput.trim().startsWith('{') || rawOutput.trim().startsWith('[')) {
+                            const parsed = JSON.parse(rawOutput);
+                            // 尝试从 LangChain 标准结构获取 content
+                            if (parsed.kwargs && parsed.kwargs.content) {
+                                cleanContent = parsed.kwargs.content;
+                            } else if (parsed.content) {
+                                cleanContent = parsed.content;
+                            } else {
+                                cleanContent = rawOutput;
+                            }
+                        } else {
+                            cleanContent = rawOutput;
+                        }
+                    } catch (e) {
+                        cleanContent = rawOutput;
+                    }
+                } else if (typeof rawOutput === 'object' && rawOutput !== null) {
+                    if (rawOutput.kwargs && rawOutput.kwargs.content) {
+                        cleanContent = rawOutput.kwargs.content;
+                    } else if (rawOutput.content) {
+                        cleanContent = rawOutput.content;
+                    } else {
+                        cleanContent = JSON.stringify(rawOutput);
+                    }
+                }
+
+                // === 🛠️ 步骤 2: 分块解析 (解决多个结果只解析一个的问题) ===
+                const sources: { title: string; url: string }[] = [];
+
+                // 按 "[结果" 分割
+                const chunks = cleanContent.split(/\[结果\s*\d+\]/);
+
+                for (const chunk of chunks) {
+                    if (!chunk.trim()) continue;
+
+                    // 兼容 \n 和 \\n
+                    const titleMatch = chunk.match(/(?:标题|Title):\s*(.+?)(?:\n|\\n|$)/);
+                    const urlMatch = chunk.match(/(?:来源|Source|Link):\s*(https?:\/\/[^\s\n\\]+)/);
+
+                    if (titleMatch && urlMatch) {
+                        const title = titleMatch[1].trim();
+                        const url = urlMatch[1].trim();
+
+                        // 简单的过滤
+                        if (title && url && !url.includes("内容摘要")) {
+                            sources.push({ title, url });
+                        }
+                    }
+                }
+
+                if (sources.length > 0) {
+                  // 🌟 关键：保存到外部变量，供后续存库使用
+                  collectedSources = sources;
+                  // 实时发送给前端展示
+                  sendData("sources", sources);
+                }
+              } catch (e) {
+                console.error("❌ 解析来源失败:", e);
+              }
+            }
+
+            // C. 文本生成
+            if (event.event === "on_chat_model_stream" && event.data.chunk.content) {
+              const text = event.data.chunk.content;
+              fullAiResponse += text;
+              sendData("text", text);
+            }
+          }
+
+          // 4. 流结束后，保存 AI 消息到数据库 (🌟 包含 sources)
+          if (fullAiResponse) {
+             await prisma.message.create({
+               data: {
+                 content: fullAiResponse,
+                 role: "ai",
+                 chatId: currentChatId,
+                 // 如果收集到了来源，存入 Json 字段，否则为 undefined
+                 sources: collectedSources.length > 0 ? collectedSources : undefined,
+               }
+             });
+          }
+
+        } catch (e) {
+          console.error("Graph Error:", e);
+          sendData("error", "生成过程中出现错误");
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new NextResponse(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
+  } catch (error: any) {
+    console.error("API Error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}

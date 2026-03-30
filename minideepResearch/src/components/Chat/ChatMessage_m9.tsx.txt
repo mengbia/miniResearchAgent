@@ -1,0 +1,112 @@
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import remarkGfm from "remark-gfm"; // 👈 1. 引入 GFM 插件
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
+
+import ThinkingProcess from "./ThinkingProcess";
+import SourceBubble from "./SourceBubble";
+import MessageActions from "./MessageActions";
+import DeepResearchIndicator from "./DeepResearchIndicator";
+
+import { Message } from "@/store/useChatStore";
+import { toast } from "sonner";
+
+interface Props {
+  message: Message;
+  onRegenerate?: () => void;
+}
+
+export default function ChatMessage({ message, onRegenerate }: Props) {
+  const isUser = message.role === "user";
+
+  const handleContentClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const katexNode = target.closest(".katex");
+
+    if (katexNode) {
+      const texSource = katexNode.querySelector("annotation")?.textContent;
+      if (texSource) {
+        navigator.clipboard.writeText(texSource);
+        toast.success("LaTeX 公式已复制");
+        e.stopPropagation();
+      }
+    }
+  };
+
+  return (
+    <div className={`group flex w-full ${isUser ? "justify-end" : "justify-start"} mb-6`}>
+      <div className={`max-w-[90%] md:max-w-[80%] flex flex-col ${isUser ? "items-end" : "items-start"}`}>
+
+        <div
+          className={`p-4 rounded-xl overflow-hidden shadow-sm w-full ${
+            isUser 
+              ? "bg-blue-600 text-white rounded-br-none" 
+              : "bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-none"
+          }`}
+        >
+          {/* 1. 思考过程 */}
+          {!isUser && message.steps && message.steps.length > 0 && (
+             <ThinkingProcess steps={message.steps} />
+          )}
+
+          {/* 2. 深度研究任务清单 */}
+          {!isUser && message.plan && message.plan.length > 0 && (
+             <DeepResearchIndicator plan={message.plan} />
+          )}
+
+          {/* 3. 正文内容 */}
+          {message.content && (
+            <div
+              onClick={handleContentClick}
+              // prose 类会自动处理 table 的样式 (边框、间距等)
+              className={`prose prose-sm dark:prose-invert break-words max-w-none ${
+                (!isUser && (message.steps?.length || message.plan?.length)) ? "mt-4 pt-4 border-t dark:border-gray-800" : ""
+              }`}
+            >
+              <ReactMarkdown
+                // 👇 2.在这里加入 remarkGfm
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+                components={{
+                  a: ({ node, ...props }) => (
+                    <a {...props} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline break-all" />
+                  ),
+                  code: ({ node, ...props }) => (
+                    <code {...props} className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded text-sm font-mono text-pink-500" />
+                  ),
+                  // 👇 3. 可选：自定义 table 样式（通常 prose 已经处理得很好了，如果需要额外优化可以在这里加）
+                  table: ({node, ...props}) => (
+                    <div className="overflow-x-auto my-4">
+                      <table {...props} className="min-w-full divide-y divide-gray-300 dark:divide-gray-700 border dark:border-gray-700 rounded-lg" />
+                    </div>
+                  ),
+                  th: ({node, ...props}) => (
+                    <th {...props} className="px-3 py-2 bg-gray-50 dark:bg-gray-800 font-semibold text-left text-xs uppercase text-gray-700 dark:text-gray-300" />
+                  ),
+                  td: ({node, ...props}) => (
+                    <td {...props} className="px-3 py-2 text-sm border-t dark:border-gray-700" />
+                  )
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
+            </div>
+          )}
+
+          {/* 4. 来源气泡 */}
+          {!isUser && message.sources && message.sources.length > 0 && (
+            <SourceBubble sources={message.sources} />
+          )}
+        </div>
+
+        <MessageActions
+          content={message.content}
+          isUser={isUser}
+          onRegenerate={!isUser ? onRegenerate : undefined}
+        />
+
+      </div>
+    </div>
+  );
+}

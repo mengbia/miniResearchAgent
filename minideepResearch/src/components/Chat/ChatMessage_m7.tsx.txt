@@ -1,0 +1,97 @@
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
+import ThinkingProcess from "./ThinkingProcess";
+import SourceBubble from "./SourceBubble"; // 👈 引入
+import MessageActions from "./MessageActions"; // 👈 引入
+import { Message } from "@/store/useChatStore";
+import { toast } from "sonner";
+
+interface Props {
+  message: Message;
+  onRegenerate?: () => void; // 👈 接收回调
+}
+
+export default function ChatMessage({ message, onRegenerate }: Props) {
+  const isUser = message.role === "user";
+
+  // 🖱️ LaTeX 点击复制逻辑
+  const handleContentClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    // 检查点击的是否是 KaTeX 公式
+    const katexNode = target.closest(".katex");
+
+    if (katexNode) {
+      // 提取隐藏的 annotation 标签中的源码
+      const texSource = katexNode.querySelector("annotation")?.textContent;
+      if (texSource) {
+        navigator.clipboard.writeText(texSource);
+
+        // 👇 2. 使用 sonner 发出提示
+        toast.success("LaTeX 公式已复制", {
+            description: texSource.slice(0, 30) + (texSource.length > 30 ? "..." : ""),
+            duration: 2000, // 2秒后自动消失
+        });
+
+        e.stopPropagation();
+      }
+    }
+  };
+
+  return (
+    <div className={`group flex w-full ${isUser ? "justify-end" : "justify-start"} mb-6`}>
+      <div className={`max-w-[90%] md:max-w-[80%] flex flex-col ${isUser ? "items-end" : "items-start"}`}>
+
+        <div
+          className={`p-4 rounded-xl overflow-hidden shadow-sm w-full ${
+            isUser 
+              ? "bg-blue-600 text-white rounded-br-none" 
+              : "bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-none"
+          }`}
+        >
+          {/* 1. 思考过程 */}
+          {!isUser && message.steps && message.steps.length > 0 && (
+            <ThinkingProcess steps={message.steps} />
+          )}
+
+          {/* 2. 正文内容 */}
+          {message.content && (
+            <div
+              onClick={handleContentClick} // 👈 绑定点击事件
+              className={`prose prose-sm dark:prose-invert break-words max-w-none ${
+                !isUser && message.steps?.length ? "mt-4" : ""
+              }`}
+            >
+              <ReactMarkdown
+                remarkPlugins={[remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+                components={{
+                  // 自定义链接渲染，处理 [1] 这种引用
+                  a: ({ node, ...props }) => {
+                    return <a {...props} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline" />;
+                  }
+                }}
+              >
+                {message.content}
+              </ReactMarkdown>
+            </div>
+          )}
+
+          {/* 3. 来源列表 (仅 AI) */}
+          {!isUser && message.sources && message.sources.length > 0 && (
+            <SourceBubble sources={message.sources} />
+          )}
+        </div>
+
+        {/* 4. 底部操作栏 (Hover 显示) */}
+        <MessageActions
+          content={message.content}
+          isUser={isUser}
+          onRegenerate={!isUser ? onRegenerate : undefined}
+        />
+
+      </div>
+    </div>
+  );
+}

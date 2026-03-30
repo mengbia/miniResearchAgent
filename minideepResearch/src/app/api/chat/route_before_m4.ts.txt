@@ -1,0 +1,57 @@
+import { NextRequest, NextResponse } from "next/server";
+import { HumanMessage } from "@langchain/core/messages";
+import { graph } from "@/agents/graph"; // 引入我们在 M2 写的图
+
+// export const runtime = "edge"; // (可选) 使用 Edge Runtime 降低延迟，如果报错可改为 'nodejs'
+// ✅ 修改后的写法
+export const runtime = "nodejs";
+
+export async function POST(req: NextRequest) {
+  try {
+    const { message } = await req.json();
+
+    // 创建一个流 (ReadableStream)
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+
+        try {
+          // 运行 LangGraph，使用 streamEvents 模式获取最细粒度的事件
+          // version="v2" 是新版 LangChain 推荐的
+          const eventStream = await graph.streamEvents(
+            { messages: [new HumanMessage(message)] },
+            { version: "v2" }
+          );
+
+          for await (const event of eventStream) {
+            // 只关注 LLM 生成的 token (on_chat_model_stream)
+            // 并且过滤掉工具调用的 token，只看最终回答
+            if (
+              event.event === "on_chat_model_stream" &&
+              event.data.chunk.content
+            ) {
+              // 发送数据给前端
+              const text = event.data.chunk.content;
+              controller.enqueue(encoder.encode(text));
+            }
+          }
+        } catch (e) {
+          console.error("Graph Error:", e);
+          controller.error(e);
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new NextResponse(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}

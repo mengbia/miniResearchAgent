@@ -1,0 +1,77 @@
+import { create } from "zustand";
+
+// 定义单个思考步骤
+export interface Step {
+  id: string;
+  type: "search" | "reading";
+  content: string; // 例如: "正在搜索: OpenAI Sora..."
+  status: "pending" | "done"; // 状态: 进行中 | 完成
+}
+
+export interface Message {
+  role: "user" | "ai";
+  content: string;
+  id: string;
+  steps?: Step[]; // 👈 新增：每条消息关联的思考步骤
+}
+
+interface ChatState {
+  messages: Message[];
+  isLoading: boolean;
+  input: string;
+
+  setInput: (val: string) => void;
+  setLoading: (status: boolean) => void;
+  addMessage: (msg: Message) => void;
+  updateLastMessage: (content: string) => void;
+
+  // 👇 M4 新增的方法
+  addStepToLastMessage: (step: Step) => void;
+  completeLastStep: () => void;
+}
+
+export const useChatStore = create<ChatState>((set) => ({
+  messages: [],
+  isLoading: false,
+  input: "",
+
+  setInput: (val) => set({ input: val }),
+  setLoading: (status) => set({ isLoading: status }),
+
+  // 添加消息时，初始化 steps 为空数组
+  addMessage: (msg) => set((state) => ({
+    messages: [...state.messages, { ...msg, steps: [] }]
+  })),
+
+  // 更新正文文本
+  updateLastMessage: (content) => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.role === "ai") {
+      lastMsg.content += content;
+    }
+    return { messages: msgs };
+  }),
+
+  // 👇 M4 实现: 添加一个思考步骤
+  addStepToLastMessage: (step) => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.role === "ai") {
+      // 确保 steps 数组存在
+      lastMsg.steps = [...(lastMsg.steps || []), step];
+    }
+    return { messages: msgs };
+  }),
+
+  // 👇 M4 实现: 将最后一个 pending 的步骤标记为 done
+  completeLastStep: () => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.role === "ai" && lastMsg.steps && lastMsg.steps.length > 0) {
+      const lastStep = lastMsg.steps[lastMsg.steps.length - 1];
+      lastStep.status = "done";
+    }
+    return { messages: msgs };
+  }),
+}));

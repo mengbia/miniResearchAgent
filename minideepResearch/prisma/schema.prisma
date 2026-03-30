@@ -1,0 +1,52 @@
+// 1. 定义生成器：告诉 Prisma 生成 TypeScript 客户端代码
+generator client {
+  provider = "prisma-client-js"
+}
+
+// 2. 定义数据源：读取 .env 里的 DATABASE_URL 连接 Postgres
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --------------------------------------
+// 数据模型定义 (Models)
+// --------------------------------------
+
+// 聊天会话表 (代表一次完整的研究任务)
+model Chat {
+  id        String    @id @default(uuid()) // 唯一ID
+  title     String    // 会话标题 (例如用户的第一个问题)
+  createdAt DateTime  @default(now())      // 创建时间
+  updatedAt DateTime  @updatedAt           // 更新时间
+
+  messages  Message[] // 关联: 一个会话包含多条消息
+}
+
+// 消息表 (代表对话中的每一句话)
+model Message {
+  id        String   @id @default(uuid())
+  content   String   // 消息内容 (Markdown 格式)
+  role      String   //角色: 'user' | 'assistant' | 'system'
+
+  // 👇 新增这一行
+  sources   Json?    // 允许为空，因为用户消息没有 sources
+
+  // 👇 新增这一行：存储深度研究的任务清单
+  plan      Json?
+
+  // 关联外键
+  chatId    String
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+}
+
+// 👇 M10 新增：分享快照表
+model SharedChat {
+  id             String   @id // 分享短码 (由后端生成)
+  title          String   // 分享标题
+  snapshot       Json     // 核心：存储选中的消息数组 (完整快照)
+  createdAt      DateTime @default(now())
+  originalChatId String?  // 关联原 Chat ID (可选)
+}

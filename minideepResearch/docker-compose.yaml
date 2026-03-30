@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # ---------------------------
+  # 1. PostgreSQL (关系型数据库)
+  # ---------------------------
+  postgres:
+    image: postgres:15
+    container_name: deep-research-replicate-pg
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}         # 读取 .env
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} # 读取 .env
+      POSTGRES_DB: ${POSTGRES_DB}             # 读取 .env
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - deep-research-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------
+  # 2. Redis (缓存与队列)
+  # ---------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: deep-research-replicate-redis
+    restart: always
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - deep-research-net
+
+  # ---------------------------
+  # 3. Minio (文件存储)
+  # ---------------------------
+  minio:
+    image: minio/minio
+    container_name: deep-research-replicate-minio
+    restart: always
+    ports:
+      - "${MINIO_API_PORT}:9000"
+      - "${MINIO_CONSOLE_PORT}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}         # 读取 .env
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD} # 读取 .env
+    # 启动命令：指定数据目录和控制台地址
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - deep-research-net
+
+networks:
+  deep-research-net:
+    driver: bridge
+
+volumes:
+  pg_data:
+  redis_data:
+  minio_data:

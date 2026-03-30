@@ -1,0 +1,72 @@
+import { Copy, RotateCw, Check, Download } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+
+interface Props {
+  content: string;
+  isUser: boolean;
+  onRegenerate?: () => void;
+}
+
+export default function MessageActions({ content, isUser, onRegenerate }: Props) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      toast.success("内容已复制");
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      console.error("Copy failed", e);
+    }
+  };
+
+  // 👇 M8 新增：下载功能
+  const handleDownload = () => {
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `deep-research-report-${Date.now()}.md`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success("报告已下载");
+  };
+
+  return (
+    <div className={`flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity ${isUser ? "justify-end text-blue-100" : "justify-start text-gray-400"}`}>
+      {/* 复制按钮 */}
+      <button
+        onClick={handleCopy}
+        className="p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-colors"
+        title="复制 Markdown"
+      >
+        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+
+      {/* 👇 下载按钮 (仅 AI 消息) */}
+      {!isUser && (
+        <button
+            onClick={handleDownload}
+            className="p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-colors"
+            title="下载报告"
+        >
+            <Download className="w-3.5 h-3.5" />
+        </button>
+      )}
+
+      {/* 重新生成按钮 */}
+      {!isUser && onRegenerate && (
+        <button
+          onClick={onRegenerate}
+          className="p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-colors"
+          title="重新生成"
+        >
+          <RotateCw className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,133 @@
+import { create } from "zustand";
+
+// 1. 定义来源接口 (M6.1 新增)
+export interface Source {
+  title: string;
+  url: string;
+}
+
+// 定义思考步骤接口
+export interface Step {
+  id: string;
+  type: "search" | "reading";
+  content: string;
+  status: "pending" | "done";
+}
+
+// 定义消息接口
+export interface Message {
+  role: "user" | "ai";
+  content: string;
+  id: string;
+  steps?: Step[];    // 思考过程
+  sources?: Source[]; // 👈 M6.1 新增：引用来源列表
+}
+
+// 定义会话列表项接口
+export interface ChatSession {
+  id: string;
+  title: string;
+  createdAt: string;
+}
+
+interface ChatState {
+  // === 数据状态 ===
+  messages: Message[];
+  chats: ChatSession[];
+  currentChatId: string | null;
+  isLoading: boolean;
+  input: string;
+
+  // === 基础 Setter ===
+  setInput: (val: string) => void;
+  setLoading: (status: boolean) => void;
+  setMessages: (msgs: Message[]) => void;
+  setChats: (chats: ChatSession[]) => void;
+  setCurrentChatId: (id: string | null) => void;
+
+  // === 消息操作逻辑 ===
+  addMessage: (msg: Message) => void;
+  updateLastMessage: (content: string) => void;
+
+  // 思考步骤相关
+  addStepToLastMessage: (step: Step) => void;
+  completeLastStep: () => void;
+
+  // 👇 M6.1 新增方法
+  setSourcesForLastMessage: (sources: Source[]) => void; // 设置引用来源
+  deleteLastMessage: () => void; // 删除最后一条消息 (用于重新生成)
+}
+
+export const useChatStore = create<ChatState>((set) => ({
+  // === 初始化状态 ===
+  messages: [],
+  chats: [],
+  currentChatId: null,
+  isLoading: false,
+  input: "",
+
+  // === 基础 Setter 实现 ===
+  setInput: (val) => set({ input: val }),
+  setLoading: (status) => set({ isLoading: status }),
+  setMessages: (msgs) => set({ messages: msgs }),
+  setChats: (chats) => set({ chats }),
+  setCurrentChatId: (id) => set({ currentChatId: id }),
+
+  // === 消息操作实现 ===
+
+  // 添加消息 (自动初始化 steps 和 sources)
+  addMessage: (msg) => set((state) => ({
+    messages: [...state.messages, { ...msg, steps: [], sources: [] }]
+  })),
+
+  // 流式更新最后一条消息的内容
+  updateLastMessage: (content) => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.role === "ai") {
+      lastMsg.content += content;
+    }
+    return { messages: msgs };
+  }),
+
+  // 添加思考步骤
+  addStepToLastMessage: (step) => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.role === "ai") {
+      lastMsg.steps = [...(lastMsg.steps || []), step];
+    }
+    return { messages: msgs };
+  }),
+
+  // 完成最后一个思考步骤
+  completeLastStep: () => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.role === "ai" && lastMsg.steps && lastMsg.steps.length > 0) {
+      const lastStep = lastMsg.steps[lastMsg.steps.length - 1];
+      lastStep.status = "done";
+    }
+    return { messages: msgs };
+  }),
+
+  // 👇 M6.1 新增：设置最后一条消息的来源
+  setSourcesForLastMessage: (sources) => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.role === "ai") {
+      lastMsg.sources = sources;
+    }
+    return { messages: msgs };
+  }),
+
+  // 👇 M6.1 新增：删除最后一条消息
+  // 场景：用户点击"重新生成"时，删除 AI 刚才的回复，保留用户的提问，然后重新触发请求
+  deleteLastMessage: () => set((state) => {
+    const msgs = [...state.messages];
+    if (msgs.length > 0) {
+      msgs.pop(); // 移除数组最后一个元素
+    }
+    return { messages: msgs };
+  }),
+}));

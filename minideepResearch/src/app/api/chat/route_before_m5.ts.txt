@@ -1,0 +1,72 @@
+import { NextRequest, NextResponse } from "next/server";
+import { HumanMessage } from "@langchain/core/messages";
+import { graph } from "@/agents/graph";
+
+// 必须使用 nodejs 运行时，因为 LangGraph 依赖的一些库在 Edge 环境受限
+export const runtime = "nodejs";
+
+export async function POST(req: NextRequest) {
+  try {
+    const { message } = await req.json();
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+
+        // 辅助函数：发送 SSE 格式数据
+        // 前端会收到: data: {"type":"...", "content":...}
+        const sendData = (type: string, content: any) => {
+          const json = JSON.stringify({ type, content });
+          controller.enqueue(encoder.encode(`data: ${json}\n\n`));
+        };
+
+        try {
+          // 使用 streamEvents 获取最细粒度的事件流
+          const eventStream = await graph.streamEvents(
+            { messages: [new HumanMessage(message)] },
+            { version: "v2" }
+          );
+
+          for await (const event of eventStream) {
+            // 1. 捕获：工具开始执行 (例如开始搜索)
+            // 过滤掉无关的工具，只看 search_web
+            if (event.event === "on_tool_start" && event.name === "search_web") {
+              sendData("tool_start", {
+                tool: event.name,
+                input: event.data.input, // 包含查询关键词
+              });
+            }
+
+            // 2. 捕获：工具执行结束 (搜索完成)
+            if (event.event === "on_tool_end" && event.name === "search_web") {
+              sendData("tool_end", {
+                tool: event.name,
+                output: event.data.output,
+              });
+            }
+
+            // 3. 捕获：LLM 生成的文本 (流式输出正文)
+            if (event.event === "on_chat_model_stream" && event.data.chunk.content) {
+              sendData("text", event.data.chunk.content);
+            }
+          }
+        } catch (e) {
+          console.error("Graph Error:", e);
+          sendData("error", "生成过程中出现错误");
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new NextResponse(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}

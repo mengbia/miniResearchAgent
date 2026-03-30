@@ -1,0 +1,93 @@
+import { NextRequest, NextResponse } from "next/server";
+import { HumanMessage } from "@langchain/core/messages";
+import { graph } from "@/agents/graph";
+import { prisma } from "@/lib/prisma"; // 引入 prisma
+
+export const runtime = "nodejs";
+
+export async function POST(req: NextRequest) {
+  try {
+    // 1. 解析请求，获取 chatId (可选)
+    const { message, chatId } = await req.json();
+
+    // 2. 数据库操作：确保 Chat 存在，并保存用户消息
+    let currentChatId = chatId;
+
+    if (!currentChatId) {
+      // 如果没有 ID，创建一个新会话
+      const newChat = await prisma.chat.create({
+        data: { title: message.slice(0, 30) }, // 用问题前30字做标题
+      });
+      currentChatId = newChat.id;
+    }
+
+    // 保存用户消息
+    await prisma.message.create({
+      data: {
+        content: message,
+        role: "user",
+        chatId: currentChatId,
+      },
+    });
+
+    // 3. 准备流式响应
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        let fullAiResponse = ""; // 用于收集 AI 的完整回答，最后存库
+
+        const sendData = (type: string, content: any) => {
+          const json = JSON.stringify({ type, content });
+          controller.enqueue(encoder.encode(`data: ${json}\n\n`));
+        };
+
+        // 发送 chatId 给前端，让前端更新 URL
+        sendData("chat_id", currentChatId);
+
+        try {
+          const eventStream = await graph.streamEvents(
+            { messages: [new HumanMessage(message)] },
+            { version: "v2" }
+          );
+
+          for await (const event of eventStream) {
+            if (event.event === "on_tool_start" && event.name === "search_web") {
+              sendData("tool_start", { tool: event.name, input: event.data.input });
+            }
+            if (event.event === "on_tool_end" && event.name === "search_web") {
+              sendData("tool_end", { tool: event.name, output: event.data.output });
+            }
+            if (event.event === "on_chat_model_stream" && event.data.chunk.content) {
+              const text = event.data.chunk.content;
+              fullAiResponse += text; // 累加文本
+              sendData("text", text);
+            }
+          }
+
+          // 4. 流结束后，保存 AI 消息到数据库
+          if (fullAiResponse) {
+             await prisma.message.create({
+               data: {
+                 content: fullAiResponse,
+                 role: "ai",
+                 chatId: currentChatId,
+               }
+             });
+          }
+
+        } catch (e) {
+          console.error("Graph Error:", e);
+          sendData("error", "生成错误");
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new NextResponse(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}

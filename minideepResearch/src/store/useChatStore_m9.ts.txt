@@ -1,0 +1,152 @@
+import { create } from "zustand";
+
+export interface Source {
+  title: string;
+  url: string;
+}
+
+export interface Step {
+  id: string;
+  type: "search" | "reading";
+  content: string;
+  status: "pending" | "done";
+}
+
+// 👇 新增：深度研究的计划项结构
+export interface PlanItem {
+  id: number;
+  task: string;
+  status: "pending" | "done";
+}
+
+export interface Message {
+  role: "user" | "ai";
+  content: string;
+  id: string;
+  steps?: Step[];      // 普通模式的思考步骤
+  sources?: Source[];
+  plan?: PlanItem[];   // 👈 M8 新增：深度模式的任务清单
+}
+
+interface ChatState {
+  messages: Message[];
+  chats: any[];
+  currentChatId: string | null;
+  isLoading: boolean;
+  input: string;
+
+  // 👇 M8 新增状态
+  researchMode: "normal" | "deep";
+  abortController: AbortController | null; // 用于停止生成
+
+  setInput: (val: string) => void;
+  setLoading: (status: boolean) => void;
+  addMessage: (msg: Message) => void;
+  updateLastMessage: (content: string) => void;
+  addStepToLastMessage: (step: Step) => void;
+  completeLastStep: () => void;
+  setMessages: (msgs: Message[]) => void;
+  setChats: (chats: any[]) => void;
+  setCurrentChatId: (id: string | null) => void;
+  setSourcesForLastMessage: (sources: Source[]) => void;
+  deleteLastMessage: () => void;
+
+  // 👇 M8 新增 Action
+  setResearchMode: (mode: "normal" | "deep") => void;
+  setAbortController: (ctrl: AbortController | null) => void;
+  updateLastMessagePlan: (plan: PlanItem[]) => void;
+}
+
+export const useChatStore = create<ChatState>((set) => ({
+  messages: [],
+  chats: [],
+  currentChatId: null,
+  isLoading: false,
+  input: "",
+
+  // 👇 M8 初始化
+  researchMode: "normal",
+  abortController: null,
+
+  setInput: (val) => set({ input: val }),
+  setLoading: (status) => set({ isLoading: status }),
+
+  addMessage: (msg) => set((state) => ({
+    messages: [...state.messages, {
+      ...msg,
+      steps: [],
+      sources: msg.sources || [],
+      plan: undefined // 初始化 plan
+    }]
+  })),
+
+  updateLastMessage: (content) => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg) lastMsg.content += content;
+    return { messages: msgs };
+  }),
+
+  addStepToLastMessage: (step) => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg) lastMsg.steps = [...(lastMsg.steps || []), step];
+    return { messages: msgs };
+  }),
+
+  completeLastStep: () => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.steps?.length) {
+      lastMsg.steps[lastMsg.steps.length - 1].status = "done";
+    }
+    return { messages: msgs };
+  }),
+
+  setMessages: (msgs) => set({ messages: msgs }),
+  setChats: (chats) => set({ chats }),
+  setCurrentChatId: (id) => set({ currentChatId: id }),
+
+  setSourcesForLastMessage: (newSources) => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+
+    if (lastMsg && lastMsg.role === "ai") {
+      // 1. 获取已有的 sources
+      const existingSources = lastMsg.sources || [];
+
+      // 2. 合并新旧 sources
+      const combinedSources = [...existingSources, ...newSources];
+
+      // 3. 去重 (根据 URL)
+      // 使用 Map，键是 url，值是 source 对象。这样相同的 url 会被覆盖（保留一个）
+      const uniqueSources = Array.from(
+        new Map(combinedSources.map((item) => [item.url, item])).values()
+      );
+
+      // 4. 赋值回去
+      lastMsg.sources = uniqueSources;
+    }
+    return { messages: msgs };
+  }),
+
+  deleteLastMessage: () => set((state) => {
+    const msgs = [...state.messages];
+    if (msgs.length > 0) msgs.pop();
+    return { messages: msgs };
+  }),
+
+  // 👇 M8 实现
+  setResearchMode: (mode) => set({ researchMode: mode }),
+
+  setAbortController: (ctrl) => set({ abortController: ctrl }),
+
+  updateLastMessagePlan: (plan) => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.role === "ai") {
+      lastMsg.plan = plan;
+    }
+    return { messages: msgs };
+  }),
+}));

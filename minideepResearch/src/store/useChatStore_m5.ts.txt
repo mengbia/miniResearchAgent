@@ -1,0 +1,84 @@
+import { create } from "zustand";
+
+// ... Step 接口保持不变 ...
+export interface Step {
+  id: string;
+  type: "search" | "reading";
+  content: string;
+  status: "pending" | "done";
+}
+
+// ... Message 接口保持不变 ...
+export interface Message {
+  role: "user" | "ai";
+  content: string;
+  id: string;
+  steps?: Step[];
+}
+
+// 新增 Chat 摘要接口
+export interface ChatSession {
+  id: string;
+  title: string;
+  createdAt: string;
+}
+
+interface ChatState {
+  messages: Message[];
+  chats: ChatSession[];   // 👈 新增: 历史列表
+  currentChatId: string | null; // 👈 新增: 当前会话ID
+  isLoading: boolean;
+  input: string;
+
+  setInput: (val: string) => void;
+  setLoading: (status: boolean) => void;
+  addMessage: (msg: Message) => void;
+  updateLastMessage: (content: string) => void;
+  addStepToLastMessage: (step: Step) => void;
+  completeLastStep: () => void;
+
+  // 👇 新增方法
+  setMessages: (msgs: Message[]) => void; // 用于加载历史
+  setChats: (chats: ChatSession[]) => void;
+  setCurrentChatId: (id: string | null) => void;
+}
+
+export const useChatStore = create<ChatState>((set) => ({
+  messages: [],
+  chats: [],
+  currentChatId: null,
+  isLoading: false,
+  input: "",
+
+  setInput: (val) => set({ input: val }),
+  setLoading: (status) => set({ isLoading: status }),
+  addMessage: (msg) => set((state) => ({ messages: [...state.messages, { ...msg, steps: [] }] })),
+
+  updateLastMessage: (content) => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg) lastMsg.content += content;
+    return { messages: msgs };
+  }),
+
+  addStepToLastMessage: (step) => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg) lastMsg.steps = [...(lastMsg.steps || []), step];
+    return { messages: msgs };
+  }),
+
+  completeLastStep: () => set((state) => {
+    const msgs = [...state.messages];
+    const lastMsg = msgs[msgs.length - 1];
+    if (lastMsg && lastMsg.steps?.length) {
+      lastMsg.steps[lastMsg.steps.length - 1].status = "done";
+    }
+    return { messages: msgs };
+  }),
+
+  // 新增方法的实现
+  setMessages: (msgs) => set({ messages: msgs }),
+  setChats: (chats) => set({ chats }),
+  setCurrentChatId: (id) => set({ currentChatId: id }),
+}));

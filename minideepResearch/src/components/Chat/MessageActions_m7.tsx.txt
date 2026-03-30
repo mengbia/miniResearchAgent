@@ -1,0 +1,44 @@
+import { Copy, RotateCw, Check } from "lucide-react";
+import { useState } from "react";
+
+interface Props {
+  content: string;
+  isUser: boolean;
+  onRegenerate?: () => void;
+}
+
+export default function MessageActions({ content, isUser, onRegenerate }: Props) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      console.error("Copy failed", e);
+    }
+  };
+
+  return (
+    <div className={`flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity ${isUser ? "justify-end text-blue-100" : "justify-start text-gray-400"}`}>
+      <button
+        onClick={handleCopy}
+        className="p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-colors"
+        title="复制 Markdown"
+      >
+        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+
+      {!isUser && onRegenerate && (
+        <button
+          onClick={onRegenerate}
+          className="p-1 hover:bg-black/10 dark:hover:bg-white/10 rounded transition-colors"
+          title="重新生成"
+        >
+          <RotateCw className="w-3.5 h-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
