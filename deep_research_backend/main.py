@@ -64,7 +64,7 @@ async def upload_document(file: UploadFile = File(...)):
         print(f"\n📥 收到新文件上传: {file.filename}")
         
         # 2. 调用我们在 rag/vector_store.py 里写好的入库逻辑
-        local_kb.process_and_save_document(file_path)
+        await asyncio.to_thread(local_kb.process_and_save_document, file_path)
         
         return {"status": "success", "message": f"文件 {file.filename} 解析并入库成功！Agent现在可以参考它了。"}
         
