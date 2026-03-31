@@ -1,3 +1,6 @@
+import sys
+sys.path.append(".")
+
 import os
 import hashlib
 from langchain_community.document_loaders import (
@@ -36,6 +39,15 @@ class LocalVectorStore:
             chunk_overlap=100,
             separators=["\n\n", "\n", "。", "！", "？", " ", ""]
         )
+
+    # 🌟 计算文件内容的 MD5 值
+    def _calculate_file_md5(self, file_path: str) -> str:
+        hasher = hashlib.md5()
+        with open(file_path, 'rb') as f:
+            # 分块读取，防止超大文件把内存撑爆
+            for chunk in iter(lambda: f.read(4096), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
 
     def process_and_save_document(self, file_path: str):
         """核心功能：识别文件 -> 计算MD5查重 -> 读取 -> 切片 -> 分配唯一ID存入数据库"""
