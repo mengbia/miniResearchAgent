@@ -20,7 +20,7 @@
 确保你的机器上已安装 **Python 3.10+** 和 **Node.js 18+**。
 
 ### 1. 后端依赖 (Python)
-进入后端目录 `deep_research_backend`，安装以下核心包：
+进入后端目录 `ResearchAgent`，安装以下核心包：
 ```bash
 pip install -r requirement.txt
 ```
@@ -36,7 +36,7 @@ npm install
 
 ## ⚙️ 环境配置
 
-在 `deep_research_backend` 根目录下创建一个 `.env` 文件，填入你的 API Keys：
+在 `ResearchAgent` 根目录下创建一个 `.env` 文件，填入你的 API Keys：
 
 ```env
 # 大语言模型配置 (Qwen 等)
@@ -54,7 +54,7 @@ TAVILY_API_KEY="tvly-你的Tavily_API_KEY"
 本项目采用前后端分离架构，需要分别启动两个服务。
 
 ### 启动后端 API 服务
-1. 打开终端，进入后端目录：`cd deep_research_backend`
+1. 打开终端，进入后端目录：`cd ResearchAgent`
 2. 启动 FastAPI 服务：
 ```bash
 uvicorn main:app --reload
