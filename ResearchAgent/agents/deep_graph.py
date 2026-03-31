@@ -1,141 +1,256 @@
+import sys
+sys.path.append(".")
+
 import json
+import asyncio
 from langgraph.graph import StateGraph, START, END
-from langchain_core.messages import HumanMessage, SystemMessage
-from tenacity import retry, stop_after_attempt, wait_exponential # 🌟 引入重试库
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from core.llm import get_llm
 from agents.tools import get_web_search_tool
 from agents.state import AgentState
 from rag.vector_store import local_kb
-import asyncio
-
 
 llm = get_llm()
 search_tool = get_web_search_tool(max_results=3)
 
-# 🌟 变化 1：函数前面加上了 async
-async def planner_node(state: AgentState):
-    query = state["user_query"]
-    prompt = f"你是一个资深研究员。用户想研究：{query}。请给出最多3个相关的搜索关键词，以逗号分隔，不要说多余的废话。"
-    
-    # 🌟 变化 2：invoke 变成了 ainvoke (异步调用)
-    response = await llm.ainvoke([HumanMessage(content=prompt)])
-    keywords = response.content.split(",")
-    
-    plan_list = []
-    for i, kw in enumerate(keywords):
-        if kw.strip():
-            plan_list.append({"id": str(i), "title": f"搜索: {kw.strip()}", "status": "pending"})
-            
-    return {"plan": plan_list}
-
-# 🌟 定义一个带重试机制的安全搜索函数(熔断机制)
-# 规则：最多重试 3 次，每次间隔按 2^x 秒指数递增（即 2s, 4s, 8s）
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
 async def safe_web_search(keyword: str):
     return await search_tool.ainvoke({"query": keyword})
 
-async def worker_node(state: AgentState):
-    """负责根据规划师的关键词，使用并发进行双擎检索"""
-    plans = state.get("plan", [])
+# ==========================================
+# 1. 初始化与规划层 (Init & Planner)
+# ==========================================
+async def init_system_node(state: AgentState):
+    """全局系统起点：注入系统提示词与人设"""
+    print("\n[System] 🌟 正在初始化深度研究网络...")
+    sys_msg = SystemMessage(content="你是顶尖的AI研究团队。所有操作必须基于事实，严禁幻觉。对于缺乏资料的问题，请主动要求补充检索。")
+    # 只需要返回你想“追加”或“更新”的状态
+    return {"messages": [sys_msg], "loop_count": 0, "sources": []}
+
+async def planner_node(state: AgentState):
+    """规划师：不仅生成关键词，还给任务打上【路由标签】"""
+    query = state["user_query"]
+    # 取出之前 Reviewer 可能给出的补充意见
+    history_context = "\n".join([m.content for m in state.get("messages", []) if isinstance(m, AIMessage)])
     
-    # 🌟 1. 定义单个关键词的双擎检索任务
-    async def fetch_single_keyword(keyword: str):
-        print(f"\n[Worker] ⚡ 线程启动，正在并发检索: {keyword}")
-        sources = []
+    prompt = f"""用户研究主题：{query}
+参考过往意见：{history_context}
+请制定最多3个搜索关键词。并且为每个词打上标签：
+如果需要查最新时事/宽泛知识，打上 [WEB]；
+如果需要查用户私有文档/具体本地合同，打上 [LOCAL]；
+如果都需要，打上 [ALL]。
+格式示例：[WEB]马斯克最新推文, [LOCAL]2023年财务报表"""
+
+    response = await llm.ainvoke([HumanMessage(content=prompt)])
+    keywords = response.content.split(",")
+    
+    plan_list = []
+    for kw in keywords:
+        if kw.strip():
+            plan_list.append({"title": kw.strip()})
+            
+    print(f"\n[Planner] 📋 制定了 {len(plan_list)} 条定向检索计划。")
+    # 覆盖之前的 plan
+    return {"plan": plan_list}
+
+# ==========================================
+# 2. 核心魔法：并行路由 (Dynamic Router)
+# ==========================================
+def route_specialists(state: AgentState):
+    """交通警察：决定图谱下一步激活哪些节点。如果返回列表，图谱就会并发执行！"""
+    plans = state.get("plan", [])
+    routes = set()
+    
+    for p in plans:
+        title = p["title"].upper()
+        if "[WEB]" in title: routes.add("web_specialist")
+        elif "[LOCAL]" in title: routes.add("local_specialist")
+        else: # 默认为 ALL
+            routes.add("web_specialist")
+            routes.add("local_specialist")
+            
+    print(f"\n[Router] 🚦 侦测到任务属性，即将并发唤醒特种部队: {list(routes)}")
+    # LangGraph 魔法：返回包含多个节点名的列表，就会开启真实的多线程并行！
+    return list(routes) 
+
+# ==========================================
+# 3. 特种部队节点 (Specialist Agents)
+# ==========================================
+async def web_specialist_node(state: AgentState):
+    """外网特工：只负责查外网"""
+    print("[Web Specialist] 🌐 外网特工出动...")
+    plans = state.get("plan", [])
+    sources = []
+    for p in plans:
+        if "[LOCAL]" in p["title"].upper(): continue # 不归我管
+        keyword = p["title"].replace("[WEB]", "").replace("[ALL]", "").strip()
         
-        # 引擎 A：查外网 (本身支持异步 ainvoke)
         try:
-            # 🌟 使用 safe_web_search 代替直接调用
-            web_results = await afe_web_search(keyword)
+            web_results = await safe_web_search(keyword)
             for res in web_results:
                 sources.append({
-                    "id": res.get("url", ""),
+                    "title": f"[全网] {res.get('title', '')}",
                     "url": res.get("url", ""),
-                    "title": f"[全网] {res.get('title', '网页来源')}",
                     "snippet": res.get("content", "")[:300]
                 })
         except Exception as e:
-            print(f"外网搜索出错 [{keyword}]: {e}")
+            print(f"外网检索异常: {e}")
+            
+    # 由于我们在 state.py 用了 operator.add，这里的 return 会把 sources 追加进去，而不是覆盖！
+    return {"sources": sources}
 
-        # 引擎 B：查内网 (将原本同步的 Chroma 检索扔进底层线程池，防阻塞)
+async def local_specialist_node(state: AgentState):
+    """内网特工：只负责查本地向量库"""
+    print("[Local Specialist] 📁 内网特工出动...")
+    plans = state.get("plan", [])
+    sources = []
+    for p in plans:
+        if "[WEB]" in p["title"].upper(): continue
+        keyword = p["title"].replace("[LOCAL]", "").replace("[ALL]", "").strip()
+        
         try:
             local_results = await asyncio.to_thread(local_kb.search_knowledge, keyword, top_k=2)
-            for i, doc in enumerate(local_results):
-                source_name = doc.metadata.get("source", "本地知识库").split("\\")[-1].split("/")[-1]
+            for doc in local_results:
+                source_name = doc.metadata.get("source", "未知").split("/")[-1]
                 sources.append({
-                    "id": f"local_{keyword}_{i}",
+                    "title": f"[内部库] {source_name}",
                     "url": f"本地文件://{source_name}",
-                    "title": f"[内部私有库] {source_name}",
                     "snippet": doc.page_content[:300]
                 })
         except Exception as e:
-            print(f"本地检索出错 [{keyword}]: {e}")
+            print(f"内网检索异常: {e}")
             
-        return sources
+    return {"sources": sources}
 
-    # 🌟 2. 将所有关键词任务打包进协程列表
-    tasks = []
-    for p in plans:
-        keyword = p["title"].replace("搜索: ", "")
-        tasks.append(fetch_single_keyword(keyword))
-        
-    # 🌟 3. 发射！使用 asyncio.gather 真正并发执行所有搜索任务！
-    print(f"\n[Worker] 🚀 准备并发执行 {len(tasks)} 个检索任务...")
-    # gather 会等待所有任务完成，并返回一个结果列表的列表
-    all_results = await asyncio.gather(*tasks)
+# ==========================================
+# 4. 汇聚与生成层 (Merge & Write)
+# ==========================================
+async def filter_node(state: AgentState):
+    """情报局长：等所有特工回来后，对情报进行去重和质检"""
+    raw_sources = state.get("sources", [])
+    print(f"\n[Filter] 🕵️ 收到 {len(raw_sources)} 份原始情报，正在去重提纯...")
     
-    # 🌟 4. 将多维数组展平，整合成最终的 sources 列表
-    all_sources = []
-    for res_list in all_results:
-        all_sources.extend(res_list)
-        
-    print(f"[Worker] ✅ 并发检索完毕，共抓取 {len(all_sources)} 条参考资料！")
-    return {"sources": all_sources}
+    # 根据 URL 去重
+    unique_sources = {s["url"]: s for s in raw_sources}.values()
+    # 也可以在这里加个大模型判断相关性...
+    
+    # 这里我们返回的时候，不再是追加，而是要“清洗”掉旧的数据。
+    # 注意：如果不做特殊处理，operator.add 会继续追加。在 LangGraph 中，覆盖列表需要特殊写法，
+    # 但为了简化，我们就让 Writer 直接用最新的 unique_sources 即可。
+    return {"sources": list(unique_sources)} # 这里简单返回，如果你懂底层，建议自定义 reducer
 
 async def writer_node(state: AgentState):
+    """撰稿人"""
     query = state["user_query"]
-    sources = state.get("sources", [])
+    sources = state.get("sources", [])[-10:] # 只取最后（最新）的10条防止超载
     
     context = "\n".join([f"- [{s['title']}]({s['url']}): {s['snippet']}" for s in sources])
+    prompt = f"用户提问：{query}\n情报资料：\n{context}\n请基于事实撰写深度Markdown报告。"
     
-    prompt = f"""你是一个专业报告撰写专家。
-用户原始问题：{query}
-以下是研究员刚从全网搜集到的最新参考资料：
-{context}
-
-请根据以上资料，写一份详细的 Markdown 深度研究报告。
-要求：逻辑清晰，分点阐述；必须结合参考资料里的具体信息，可以在文中多用加粗和列表。
-"""
-    print("\n[Writer] 正在撰写深度报告并实时流式输出...")
-    # 🌟 变化 4：异步调用大模型写报告
+    print("\n[Writer] ✍️ 正在奋笔疾书...")
     response = await llm.ainvoke([SystemMessage(content=prompt)])
     return {"report": response.content}
 
-# 组装图神经网络
-workflow = StateGraph(AgentState)
-workflow.add_node("planner", planner_node)
-workflow.add_node("worker", worker_node)
-workflow.add_node("writer", writer_node)
+# ==========================================
+# 5. 审查与闭环 (Review & Loop)
+# ==========================================
+async def reviewer_node(state: AgentState):
+    """审查员"""
+    loop_count = state.get("loop_count", 0)
+    if loop_count >= 2:
+        return {"loop_count": loop_count + 1}
+        
+    print(f"\n[Reviewer] 🧐 严厉审查第 {loop_count + 1} 版报告...")
+    report = state.get("report", "")
+    response = await llm.ainvoke([SystemMessage(content=f"审阅以下报告，如有关键事实缺失请输出FAIL，否则输出PASS。\n{report[:2000]}")])
+    
+    if "FAIL" in response.content.upper():
+        print("[Reviewer] ❌ 发现信息断层，打回重做！")
+        return {
+            "loop_count": loop_count + 1,
+            "messages": [AIMessage(content=f"打回理由：{response.content}")] # 追加消息
+        }
+    print("[Reviewer] ✅ 审查通过！")
+    return {"loop_count": loop_count + 1}
 
-workflow.add_edge(START, "planner")
-workflow.add_edge("planner", "worker")
-workflow.add_edge("worker", "writer")
-workflow.add_edge("writer", END)
+def review_router(state: AgentState) -> str:
+    loop_count = state.get("loop_count", 0)
+    last_msg = state.get("messages", [])[-1].content if state.get("messages") else ""
+    if "打回理由" in last_msg and loop_count <= 2:
+        return "planner"
+    return "end"
+
+# ==========================================
+# 🌟 构建网状拓扑图 (The Graph Topology)
+# ==========================================
+workflow = StateGraph(AgentState)
+
+# 注册所有节点
+workflow.add_node("init", init_system_node)
+workflow.add_node("planner", planner_node)
+workflow.add_node("web_specialist", web_specialist_node)
+workflow.add_node("local_specialist", local_specialist_node)
+workflow.add_node("filter", filter_node)
+workflow.add_node("writer", writer_node)
+workflow.add_node("reviewer", reviewer_node)
+
+# 连线：起跑线
+workflow.add_edge(START, "init")
+workflow.add_edge("init", "planner")
+
+# 连线：动态并行分发 (Planner 查完后，由 Router 决定走哪条路，或者两条路同时走)
+workflow.add_conditional_edges("planner", route_specialists, ["web_specialist", "local_specialist"])
+
+# 连线：海纳百川 (所有特工无论谁先跑完，最终都在 Filter 处汇聚)
+workflow.add_edge("web_specialist", "filter")
+workflow.add_edge("local_specialist", "filter")
+
+# 连线：后半段直线流程
+workflow.add_edge("filter", "writer")
+workflow.add_edge("writer", "reviewer")
+
+# 连线：审查员的“回头草”条件分支
+workflow.add_conditional_edges("reviewer", review_router, {"planner": "planner", "end": END})
 
 deep_research_graph = workflow.compile()
 
+
+
 # ========== 底部测试代码 ==========
 if __name__ == "__main__":
-    print("🚀 正在独立测试 LangGraph 智能体网络...")
+    import asyncio
+    import sys
+
+    async def main():
+        print("🚀 正在独立测试多智能体 LangGraph 网络...")
+        
+        # 模拟用户提问并初始化完整状态字典
+        test_state = {
+            "user_query": "2026年固态电池的最新商业化进展，并结合本地库信息进行对比", 
+            "messages": [],
+            "plan": [],
+            "sources": [],
+            "report": "",
+            "loop_count": 0
+        }
+        
+        # 运行整个图网络 (由于节点全是 async，这里使用 ainvoke)
+        result = await deep_research_graph.ainvoke(test_state)
+        
+        print("\n" + "="*50)
+        print("🏁 测试运行结束！")
+        print("="*50)
+        print(f"📋 最终生成的计划: {[p.get('title', '') for p in result.get('plan', [])]}")
+        print(f"📚 汇聚并清洗后的资料数: {len(result.get('sources', []))} 条")
+        print(f"🔄 深度审查循环次数: {result.get('loop_count', 0)} 次")
+        print("-" * 50)
+        print("✅ 最终深度报告:\n")
+        print(result.get("report", "无报告生成"))
+
+    # 解决 Windows 系统下 Asyncio 可能会报错的问题
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     
-    # 模拟用户提问
-    test_state = {"user_query": "2026年固态电池的最新商业化进展", "messages": []}
-    
-    # 运行整个图网络
-    result = deep_research_graph.invoke(test_state)
-    
-    print("\n" + "="*40)
-    print("生成的计划:", result.get("plan"))
-    print("搜到的资料数:", len(result.get("sources", [])))
-    print("最终报告:\n", result.get("report"))
+    asyncio.run(main())
