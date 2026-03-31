@@ -1,6 +1,13 @@
-from typing import Annotated, TypedDict, List, Optional
+from typing import TypedDict, List, Dict, Any, Annotated
 from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
+import operator
+
+'''
+在 LangGraph 中，如果让两个节点（外网特工和内网特工）同时并行运行，它们会抢夺并覆盖同一个 sources 列表。
+为了让它们查到的资料能合并在一起，我们必须使用 Python 的 operator.add
+'''
+
 
 # --- 定义基础数据结构（必须和前端的结构对应上） ---
 
@@ -16,23 +23,12 @@ class Source(TypedDict):
     snippet: str
 
 # --- 定义核心档案袋（AgentState） ---
-# 这个 State 会在 Planner -> Worker -> Writer 之间不断传递和累加
-
 class AgentState(TypedDict):
-    # 1. 聊天记录 (Annotated + add_messages 表示新消息会追加到列表末尾，而不是覆盖)
-    messages: Annotated[list[AnyMessage], add_messages]
-    
-    # 2. 用户当前要研究的核心问题
     user_query: str
-    
-    # 3. 规划师 (Planner) 拆解出来的研究计划列表
-    plan: List[PlanItem]
-    
-    # 4. 研究员 (Worker) 从全网搜集回来的网页资料
-    sources: List[Source]
-    
-    # 5. 撰稿人 (Writer) 最终写出的长篇报告
+    # 🌟 核心：使用 Annotated 和 operator.add，实现状态合并
+    # 当多个并行节点同时往这里塞数据时，LangGraph 会自动把它们加在一起，而不是互相覆盖！
+    messages: Annotated[List[Any], operator.add]
+    plan: List[Dict[str, str]]
+    sources: Annotated[List[Dict[str, str]], operator.add]
     report: str
-    
-    # 6. 当前执行到了计划的哪一步（用于 Worker 循环时的指针）
-    current_step_index: int
+    loop_count: int
