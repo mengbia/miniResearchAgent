@@ -5,20 +5,23 @@ import os
 # 确保环境变量里有 TAVILY_API_KEY，LangChain 底层会自动去这里找
 os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
 
-def get_web_search_tool(max_results: int = 3):
+def get_web_search_tool(max_results: int = 4):
     """
-    获取联网搜索工具
-    :param max_results: 每次搜索返回的网页数量，深度研究可以设大一点
+    增强版全网搜索引擎
+    使用 Tavily 的高级参数，强制返回包含完整内容的高质量链接
     """
-    # 实例化 Tavily 搜索工具
-    # search_depth="advanced" 表示深度搜索，返回更详细的网页正文片段
-    tool = TavilySearchResults(
+    if not TAVILY_API_KEY:
+        raise ValueError("TAVILY_API_KEY 未配置！请在 .env 文件中设置。")
+        
+    os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
+    
+    # 启用 advanced 模式，并尽量拉取长文本 content
+    search_tool = TavilySearchResults(
         max_results=max_results,
-        search_depth="advanced",
-        include_answer=True,
-        include_raw_content=True
+        search_depth="advanced", # 开启高级深度搜索
+        include_raw_content=True # 尽可能提取网页正文
     )
-    return tool
+    return search_tool
 
 # ========== 下面是用于单独测试这个工具的代码 ==========
 if __name__ == "__main__":
