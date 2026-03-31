@@ -20,7 +20,7 @@
 确保你的机器上已安装 **Python 3.10+** 和 **Node.js 18+**。
 
 ### 1. 后端依赖 (Python)
-进入后端目录 `ResearchAgent`，安装以下核心包：
+进入后端目录 `ResearchAgent`，安装核心包：
 ```bash
 pip install -r requirement.txt
 ```
