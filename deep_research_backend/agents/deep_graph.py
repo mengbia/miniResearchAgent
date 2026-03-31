@@ -6,6 +6,8 @@ from core.llm import get_llm
 from agents.tools import get_web_search_tool
 from agents.state import AgentState
 from rag.vector_store import local_kb
+import asyncio
+
 
 llm = get_llm()
 search_tool = get_web_search_tool(max_results=3)
@@ -27,47 +29,60 @@ async def planner_node(state: AgentState):
     return {"plan": plan_list}
 
 async def worker_node(state: AgentState):
-    """负责根据规划师的关键词，同时进行【外网搜索】和【本地检索】"""
+    """负责根据规划师的关键词，使用并发进行双擎检索"""
     plans = state.get("plan", [])
-    all_sources = []
     
-    for p in plans:
-        keyword = p["title"].replace("搜索: ", "")
-        print(f"\n[Worker] 正在执行双擎检索: {keyword}")
+    # 🌟 1. 定义单个关键词的双擎检索任务
+    async def fetch_single_keyword(keyword: str):
+        print(f"\n[Worker] ⚡ 线程启动，正在并发检索: {keyword}")
+        sources = []
         
-        # ==========================================
-        # 引擎 A：查外网 (Tavily)
-        # ==========================================
+        # 引擎 A：查外网 (本身支持异步 ainvoke)
         try:
             web_results = await search_tool.ainvoke({"query": keyword})
             for res in web_results:
-                all_sources.append({
+                sources.append({
                     "id": res.get("url", ""),
                     "url": res.get("url", ""),
                     "title": f"[全网] {res.get('title', '网页来源')}",
                     "snippet": res.get("content", "")[:300]
                 })
         except Exception as e:
-            print(f"外网搜索出错: {e}")
+            print(f"外网搜索出错 [{keyword}]: {e}")
 
-        # ==========================================
-        # 引擎 B：查内网 (本地 ChromaDB)
-        # ==========================================
+        # 引擎 B：查内网 (将原本同步的 Chroma 检索扔进底层线程池，防阻塞)
         try:
-            local_results = local_kb.search_knowledge(keyword, top_k=2) # 每次取最相关的2段本地文本
+            local_results = await asyncio.to_thread(local_kb.search_knowledge, keyword, top_k=2)
             for i, doc in enumerate(local_results):
-                # 从文档的 metadata 中获取原文件名，如果没有就写“本地知识库”
                 source_name = doc.metadata.get("source", "本地知识库").split("\\")[-1].split("/")[-1]
-                
-                all_sources.append({
+                sources.append({
                     "id": f"local_{keyword}_{i}",
-                    "url": f"本地文件://{source_name}", # 给前端展示用的伪装URL
+                    "url": f"本地文件://{source_name}",
                     "title": f"[内部私有库] {source_name}",
                     "snippet": doc.page_content[:300]
                 })
         except Exception as e:
-            print(f"本地检索出错: {e}")
+            print(f"本地检索出错 [{keyword}]: {e}")
             
+        return sources
+
+    # 🌟 2. 将所有关键词任务打包进协程列表
+    tasks = []
+    for p in plans:
+        keyword = p["title"].replace("搜索: ", "")
+        tasks.append(fetch_single_keyword(keyword))
+        
+    # 🌟 3. 发射！使用 asyncio.gather 真正并发执行所有搜索任务！
+    print(f"\n[Worker] 🚀 准备并发执行 {len(tasks)} 个检索任务...")
+    # gather 会等待所有任务完成，并返回一个结果列表的列表
+    all_results = await asyncio.gather(*tasks)
+    
+    # 🌟 4. 将多维数组展平，整合成最终的 sources 列表
+    all_sources = []
+    for res_list in all_results:
+        all_sources.extend(res_list)
+        
+    print(f"[Worker] ✅ 并发检索完毕，共抓取 {len(all_sources)} 条参考资料！")
     return {"sources": all_sources}
 
 async def writer_node(state: AgentState):
