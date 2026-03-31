@@ -1,4 +1,5 @@
 import os
+import hashlib
 from langchain_community.document_loaders import (
     PyPDFLoader,
     TextLoader,
@@ -6,7 +7,7 @@ from langchain_community.document_loaders import (
     UnstructuredMarkdownLoader
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-# 替换为阿里云官方嵌入模型（解决参数错误）
+# 为阿里云官方嵌入模型
 from langchain_community.embeddings import DashScopeEmbeddings
 from langchain_chroma import Chroma
 from core.config import LLM_API_KEY, LLM_API_BASE, LLM_MODEL_NAME
@@ -16,7 +17,7 @@ CHROMA_PERSIST_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "c
 
 class LocalVectorStore:
     def __init__(self):
-        # 1. 初始化【阿里云通义千问专属】词向量模型（完美解决参数错误）
+        # 1. 初始化【阿里云通义千问专属】词向量模型
         self.embeddings = DashScopeEmbeddings(
             model="text-embedding-v2",
             dashscope_api_key=LLM_API_KEY
@@ -37,33 +38,42 @@ class LocalVectorStore:
         )
 
     def process_and_save_document(self, file_path: str):
-        """核心功能：识别文件格式 -> 读取 -> 切片 -> 存入数据库"""
+        """核心功能：识别文件 -> 计算MD5查重 -> 读取 -> 切片 -> 分配唯一ID存入数据库"""
         ext = os.path.splitext(file_path)[-1].lower()
-        loader = None
-
-        print(f"📁 正在解析文件: {file_path}")
+        print(f"📁 正在处理文件: {file_path}")
         
-        # 根据后缀名选择不同的 Loader
-        if ext == ".pdf":
-            loader = PyPDFLoader(file_path)
-        elif ext == ".txt":
-            loader = TextLoader(file_path, encoding='utf-8')
-        elif ext == ".docx":
-            loader = Docx2txtLoader(file_path)
-        elif ext == ".md":
-            loader = UnstructuredMarkdownLoader(file_path)
-        else:
-            raise ValueError(f"不支持的文件格式: {ext}")
+        # 🌟 1. 计算全文 MD5
+        file_md5 = self._calculate_file_md5(file_path)
+        print(f"   [MD5指纹]: {file_md5}")
 
-        # 1. 读取完整文档
+        # 🌟 2. 利用 MD5 进行去重校验 (检查数据库里是否已经有这个文件的切片了)
+        # Chroma 允许我们通过 where 过滤 metadata 来查询
+        existing_docs = self.vector_store.get(where={"file_md5": file_md5})
+        if existing_docs and len(existing_docs["ids"]) > 0:
+            print("   ⏩ 检测到文件内容完全一致，已跳过向量化，直接秒传！")
+            return True
+
+        # 3. 文件解析 (这里保持原来的 Loader 逻辑)
+        if ext == ".pdf": loader = PyPDFLoader(file_path)
+        elif ext == ".txt": loader = TextLoader(file_path, encoding='utf-8')
+        elif ext == ".docx": loader = Docx2txtLoader(file_path)
+        elif ext == ".md": loader = UnstructuredMarkdownLoader(file_path)
+        else: raise ValueError(f"不支持的文件格式: {ext}")
+
         docs = loader.load()
-        
-        # 2. 切片
         split_docs = self.text_splitter.split_documents(docs)
         print(f"✂️ 文件已被切分为 {len(split_docs)} 个片段。")
 
-        # 3. 存入 ChromaDB
-        self.vector_store.add_documents(split_docs)
+        # 🌟 4. 为每个切片打上 MD5 烙印，并生成全局唯一 ID
+        chunk_ids = []
+        for i, doc in enumerate(split_docs):
+            # 将 MD5 存入元数据，方便以后查重或精准删除
+            doc.metadata["file_md5"] = file_md5
+            # 生成形如 "d41d8cd98f00b204e9800998ecf8427e_chunk_0" 的绝对唯一 ID
+            chunk_ids.append(f"{file_md5}_chunk_{i}")
+
+        # 🌟 5. 带 ID 入库 (如果 ID 重复，Chroma 会自动更新而不是新增，杜绝冗余)
+        self.vector_store.add_documents(documents=split_docs, ids=chunk_ids)
         print("✅ 成功存入向量数据库！")
         return True
 
