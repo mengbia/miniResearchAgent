@@ -4,3 +4,4 @@ uploads/
 __pycache__/
 evaluation_result/
 chroma_data/
+logs/
