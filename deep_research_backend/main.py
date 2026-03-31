@@ -20,6 +20,9 @@ from agents.deep_graph import deep_research_graph
 from agents.chat_agent import normal_chat_agent
 from core.llm import get_llm  # 🌟 引入基础大脑用于闲聊
 
+#日志
+from core.logger import logger, trace_agent_event, log_user_interaction
+
 app = FastAPI(title="Deep Research Agent Backend")
 
 # 新增根接口，解决无限加载
@@ -76,6 +79,9 @@ async def chat_endpoint(request: ChatRequest):
     mode = request.mode  # 🌟 获取前端当前的模式
     print(f"\n🚀 接收到提问: {user_query} | 当前模式: {mode}")
 
+    # 🌟 将用户的操作落盘到日志文件
+    log_user_interaction("User", f"[{mode.upper()}] {user_query}")
+
     # 初始化大模型（用于闲聊）
     llm = get_llm()
 
@@ -87,6 +93,9 @@ async def chat_endpoint(request: ChatRequest):
             if mode == "deep":
                 state = {"user_query": user_query, "messages": [], "plan": [], "sources": [], "report": ""}
                 async for event in deep_research_graph.astream_events(state, version="v2"):
+                     # 🌟 解耦追踪！把事件直接抛给日志模块
+                    trace_agent_event(event)
+
                     kind = event["event"]
                     node_name = event.get("metadata", {}).get("langgraph_node", "")
                     
@@ -124,6 +133,10 @@ async def chat_endpoint(request: ChatRequest):
                 
                 # 3. 🌟 启动监听器，实时把 Agent 思考和调用工具的过程发给前端
                 async for event in normal_chat_agent.astream_events(state, version="v2"):
+                   
+                    # 🌟 无侵入式解耦追踪！
+                    trace_agent_event(event)
+
                     kind = event["event"]
                     
                     # 监听动作 A：大模型决定拿工具了！给前端发一个优雅的加载动画
@@ -144,6 +157,10 @@ async def chat_endpoint(request: ChatRequest):
 
         except Exception as e:
             print(f"❌ 报错: {e}")
+
+            # 🌟 记录系统崩溃日志
+            logger.error(f"Web API 运行崩溃: {str(e)}")
+
             error_data = json.dumps({"type": "text", "content": f"\n\n后端报错: {str(e)}"}, ensure_ascii=False)
             yield f"data: {error_data}\n\n"
 
