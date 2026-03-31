@@ -1,6 +1,7 @@
 import json
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage, SystemMessage
+from tenacity import retry, stop_after_attempt, wait_exponential # 🌟 引入重试库
 
 from core.llm import get_llm
 from agents.tools import get_web_search_tool
@@ -28,6 +29,12 @@ async def planner_node(state: AgentState):
             
     return {"plan": plan_list}
 
+# 🌟 定义一个带重试机制的安全搜索函数(熔断机制)
+# 规则：最多重试 3 次，每次间隔按 2^x 秒指数递增（即 2s, 4s, 8s）
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+async def safe_web_search(keyword: str):
+    return await search_tool.ainvoke({"query": keyword})
+
 async def worker_node(state: AgentState):
     """负责根据规划师的关键词，使用并发进行双擎检索"""
     plans = state.get("plan", [])
@@ -39,7 +46,8 @@ async def worker_node(state: AgentState):
         
         # 引擎 A：查外网 (本身支持异步 ainvoke)
         try:
-            web_results = await search_tool.ainvoke({"query": keyword})
+            # 🌟 使用 safe_web_search 代替直接调用
+            web_results = await afe_web_search(keyword)
             for res in web_results:
                 sources.append({
                     "id": res.get("url", ""),
