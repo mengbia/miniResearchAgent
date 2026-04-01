@@ -9,6 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
+from fastapi import FastAPI, BackgroundTasks # 🌟 引入 BackgroundTasks
+from rag.memory_store import user_memory # 🌟 引入记忆库
+
 import os
 import shutil
 from fastapi import FastAPI, UploadFile, File
@@ -79,6 +82,19 @@ async def chat_endpoint(request: ChatRequest):
     mode = request.mode  # 🌟 获取前端当前的模式
     print(f"\n🚀 接收到提问: {user_query} | 当前模式: {mode}")
 
+    # ==========================================
+    # 🌟 长期记忆 (LTM)：触发后台静默提取
+    # ==========================================
+    # 用户发完消息，后台立刻去分析这句话有没有价值存入 Chroma，不阻塞当前响应
+    background_tasks.add_task(user_memory.async_extract_and_save, user_query)
+
+    # ==========================================
+    # 🌟 短期记忆 (STM)：滑动窗口机制
+    # ==========================================
+    # 规则：只取最近的 10 条消息（即最近 5 轮对话），防止 Token 撑爆和上下文干扰
+    WINDOW_SIZE = 10 
+    recent_messages = request.messages[-WINDOW_SIZE:] if len(request.messages) > WINDOW_SIZE else request.messages
+    
     # 🌟 将用户的操作落盘到日志文件
     log_user_interaction("User", f"[{mode.upper()}] {user_query}")
 
@@ -120,16 +136,26 @@ async def chat_endpoint(request: ChatRequest):
             # 分支 2：普通闲聊模式 (企业级 Agentic RAG 版)
             # ==========================================
             else:
-                # 1. 组装前端传来的历史聊天记录
-                history = []
-                for msg in request.messages:
-                    if msg.role == "user":
-                        history.append(HumanMessage(content=msg.content))
-                    else:
-                        history.append(AIMessage(content=msg.content))
+                # ==========================================
+                # 🌟 长期记忆 (LTM)：动态检索与注入
+                # ==========================================
+                # 提问前，先从 Chroma 捞出跟当前问题相关的长期偏好
+                relevant_memories = user_memory.retrieve_memory(user_query)
+                print(f"🔮 [提取到的相关长期记忆]:\n{relevant_memories}")
                 
-                # 2. 包装成 LangGraph 需要的 state
-                state = {"messages": history}
+                # 读取基础 prompt 模板
+                base_system_prompt = prompt_manager.get("chat_agent", "system_prompt")
+                # 将捞出来的记忆动态注入进去
+                injected_prompt = base_system_prompt.format(long_term_memory=relevant_memories)
+
+                # 重新初始化带有最新记忆的 Agent (注意：这在生产中最好缓存，但目前每次重新实例化也没问题)
+                memory_aware_agent = create_react_agent(
+                    get_llm(),
+                    tools=tools, 
+                    state_modifier=SystemMessage(content=injected_prompt)
+                )
+
+                state = {"messages": history} # 这里的 history 已经是滑动窗口截断过的了
                 
                 # 3. 🌟 启动监听器，实时把 Agent 思考和调用工具的过程发给前端
                 async for event in normal_chat_agent.astream_events(state, version="v2"):

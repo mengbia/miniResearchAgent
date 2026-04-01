@@ -1,17 +1,21 @@
 import asyncio
 import sys
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
-# 导入业务大模型
-from agents.chat_agent import normal_chat_agent
+# 导入图谱与基础组件
 from agents.deep_graph import deep_research_graph
+from langgraph.prebuilt import create_react_agent
+from core.llm import get_llm
+from agents.chat_agent import tools  # 🌟 导入我们在 chat_agent 里定义好的工具箱
 
-# 🌟 引入刚刚写好的独立日志模块
+# 引入基建模块（日志、提示词、记忆库）
 from core.logger import logger, trace_agent_event, log_user_interaction, log_filepath
+from core.prompt_manager import prompt_manager
+from rag.memory_store import user_memory  # 🌟 引入记忆引擎
 
 async def main():
     print("="*60)
-    print(" 🛠️  Deep Research Agent - 终端调试控制台")
+    print(" 🛠️  Deep Research Agent - 终端调试控制台 (混合记忆增强版)")
     print(" 指令：")
     print("   - 输入 'quit' 或 'exit' 结束对话并保存日志。")
     print("   - 输入 '/mode normal' 切换为闲聊(工具)模式。")
@@ -23,10 +27,10 @@ async def main():
     
     mode = "normal"
     chat_history = []
+    WINDOW_SIZE = 10  # 🌟 设定短期记忆滑动窗口大小 (保留最近10条消息 = 5轮对话)
 
     while True:
         try:
-            # 1. 获取终端输入
             user_input = input(f"\n[{mode.upper()}] 👤 你: ")
         except (KeyboardInterrupt, EOFError):
             break
@@ -49,23 +53,46 @@ async def main():
         if not user_input.strip():
             continue
 
-        # 记录用户输入
         log_user_interaction("User", user_input)
+        
+        # ==========================================
+        # 🌟 1. 长期记忆 (LTM)：触发后台静默提取
+        # ==========================================
+        # 使用原生 asyncio 创建后台任务，不阻塞当前主线程的响应速度
+        asyncio.create_task(user_memory.async_extract_and_save(user_input))
+
+        # ==========================================
+        # 🌟 2. 短期记忆 (STM)：压入历史记录并执行滑动窗口截断
+        # ==========================================
         chat_history.append(HumanMessage(content=user_input))
-        
+        if len(chat_history) > WINDOW_SIZE:
+            chat_history = chat_history[-WINDOW_SIZE:]
+
         print(f"[{mode.upper()}] 🤖 AI: ", end="", flush=True)
-        
         final_answer = ""
+        
         try:
-            # ==========================================
-            # 分支 A：普通闲聊模式 (调用 normal_chat_agent)
-            # ==========================================
             if mode == "normal":
+                # ==========================================
+                # 🌟 3. 动态注入长期记忆并构建 Agent
+                # ==========================================
+                relevant_memories = user_memory.retrieve_memory(user_input)
+                base_system_prompt = prompt_manager.get("chat_agent", "system_prompt")
+                
+                # 确保 JSON 中的 prompts 里有 {long_term_memory} 占位符
+                injected_prompt = base_system_prompt.format(long_term_memory=relevant_memories)
+
+                # 实时组装拥有最新记忆的聊天智能体
+                memory_aware_agent = create_react_agent(
+                    get_llm(),
+                    tools=tools,
+                    state_modifier=SystemMessage(content=injected_prompt)
+                )
+
                 state = {"messages": chat_history}
-                async for event in normal_chat_agent.astream_events(state, version="v2"):
-                    # 🌟 将事件丢给解耦的 logger 进行追踪
+                
+                async for event in memory_aware_agent.astream_events(state, version="v2"):
                     trace_agent_event(event)
-                    
                     kind = event["event"]
                     if kind == "on_tool_start":
                         print(f"\n   [🛠️ 正在调用工具: {event['name']}]...", end="\n   ")
@@ -75,15 +102,11 @@ async def main():
                             print(chunk, end="", flush=True)
                             final_answer += chunk
 
-            # ==========================================
-            # 分支 B：深度研究模式 (调用 deep_research_graph)
-            # ==========================================
             elif mode == "deep":
-                state = {"user_query": user_input, "messages": [], "plan": [], "sources": [], "report": ""}
+                # 深度模式目前还是单次提问执行 (也可以根据需要把 chat_history 传进去供 Planner 参考)
+                state = {"user_query": user_input, "messages": chat_history, "plan": [], "sources": [], "report": "", "loop_count": 0}
                 async for event in deep_research_graph.astream_events(state, version="v2"):
-                    # 🌟 同样丢给解耦的 logger 进行追踪
                     trace_agent_event(event)
-                    
                     kind = event["event"]
                     node_name = event.get("metadata", {}).get("langgraph_node", "")
                     
@@ -101,13 +124,17 @@ async def main():
             print(f"\n❌ 终端执行报错: {str(e)}")
             logger.error(f"终端执行报错: {str(e)}")
             
-        print() # 换行
+        print() 
         
-        # 记录 AI 的最终完整回复
+        # 🌟 4. 将 AI 的回复也存入短期记忆滑动窗口
+        if final_answer:
+            chat_history.append(AIMessage(content=final_answer))
+            if len(chat_history) > WINDOW_SIZE:
+                chat_history = chat_history[-WINDOW_SIZE:]
+                
         log_user_interaction("AI", final_answer)
 
 if __name__ == "__main__":
-    # 解决 Windows 下 Asyncio 可能会报错的问题
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     
