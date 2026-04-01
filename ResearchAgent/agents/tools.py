@@ -2,6 +2,7 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 from core.config import TAVILY_API_KEY
 import os
 
+
 # 确保环境变量里有 TAVILY_API_KEY，LangChain 底层会自动去这里找
 os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
 

@@ -6,7 +6,7 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from agents.deep_graph import deep_research_graph
 from langgraph.prebuilt import create_react_agent
 from core.llm import get_llm
-from agents.chat_agent import tools  # 🌟 导入我们在 chat_agent 里定义好的工具箱
+from agents.chat_agent import tools  # 🌟 导入工具箱
 
 # 引入基建模块（日志、提示词、记忆库）
 from core.logger import logger, trace_agent_event, log_user_interaction, log_filepath
@@ -86,7 +86,7 @@ async def main():
                 memory_aware_agent = create_react_agent(
                     get_llm(),
                     tools=tools,
-                    state_modifier=SystemMessage(content=injected_prompt)
+                    prompt=injected_prompt
                 )
 
                 state = {"messages": chat_history}

@@ -22,5 +22,5 @@ system_prompt = prompt_manager.get("chat_agent", "system_prompt")
 normal_chat_agent = create_react_agent(
     llm,
     tools=tools,
-    state_modifier=SystemMessage(content=system_prompt)
+    prompt=system_prompt
 )

@@ -152,7 +152,7 @@ async def chat_endpoint(request: ChatRequest):
                 memory_aware_agent = create_react_agent(
                     get_llm(),
                     tools=tools, 
-                    state_modifier=SystemMessage(content=injected_prompt)
+                    prompt=injected_prompt
                 )
 
                 state = {"messages": history} # 这里的 history 已经是滑动窗口截断过的了
