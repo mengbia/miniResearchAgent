@@ -128,16 +128,18 @@ async def local_specialist_node(state: AgentState):
 async def filter_node(state: AgentState):
     """情报局长：等所有特工回来后，对情报进行去重和质检"""
     raw_sources = state.get("sources", [])
-    print(f"\n[Filter] 🕵️ 收到 {len(raw_sources)} 份原始情报，正在去重提纯...")
+    print(f"\n[Filter] 🕵️ 收到 {len(raw_sources)} 份原始情报，准备执行强制清洗...")
     
-    # 根据 URL 去重
-    unique_sources = {s["url"]: s for s in raw_sources}.values()
-    # 也可以在这里加个大模型判断相关性...
+    # 1. 模拟数据清洗逻辑 (例如：剔除内容太少的废渣数据)
+    filtered_sources = [s for s in raw_sources if len(s.get("snippet", "")) > 10]
     
-    # 这里我们返回的时候，不再是追加，而是要“清洗”掉旧的数据。
-    # 注意：如果不做特殊处理，operator.add 会继续追加。在 LangGraph 中，覆盖列表需要特殊写法，
-    # 但为了简化，我们就让 Writer 直接用最新的 unique_sources 即可。
-    return {"sources": list(unique_sources)} # 这里简单返回，如果你懂底层，建议自定义 reducer
+    # 如果你想做更复杂的 LLM 过滤，也可以在这里写
+    
+    print(f"[Filter] ✨ 清洗完毕，保留 {len(filtered_sources)} 条有效数据。")
+    
+    # 🌟 核心破局点：使用特殊的字典格式，触发 Reducer 的【强制覆盖模式】
+    # 这样就能彻底斩断 operator.add 造成的无限膨胀死循环！
+    return {"sources": {"action": "overwrite", "data": filtered_sources}}
 
 async def writer_node(state: AgentState):
     """撰稿人"""
