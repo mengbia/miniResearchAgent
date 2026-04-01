@@ -116,6 +116,9 @@ export default function Home() {
     const controller = new AbortController();
     setAbortController(controller);
 
+    // ✨ 核心修复：把变量声明移到 try 块的外面！
+    let accumulatedContent = "";
+
     try {
       const currentMessages = useChatStore.getState().messages.filter(m => m.content !== "");
 

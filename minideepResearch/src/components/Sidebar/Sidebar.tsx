@@ -33,7 +33,7 @@ export default function Sidebar() {
   // 4. 删除对话
   const deleteChat = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation(); // 防止触发 click 选中
-    if(!confirm("确定删除吗？")) return;
+    if (!confirm("确定删除吗？")) return;
 
     await fetch(`/api/chat/${id}`, { method: "DELETE" });
     setChats(chats.filter(c => c.id !== id));
@@ -57,11 +57,10 @@ export default function Sidebar() {
           <div
             key={chat.id}
             onClick={() => loadChat(chat.id)}
-            className={`group flex items-center justify-between p-3 rounded-lg cursor-pointer text-sm mb-1 ${
-              currentChatId === chat.id 
-                ? "bg-gray-200 dark:bg-gray-800 font-medium" 
+            className={`group flex items-center justify-between p-3 rounded-lg cursor-pointer text-sm mb-1 ${currentChatId === chat.id
+                ? "bg-gray-200 dark:bg-gray-800 font-medium"
                 : "hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-400"
-            }`}
+              }`}
           >
             <div className="flex items-center gap-2 truncate">
               <MessageSquare className="w-4 h-4 shrink-0" />

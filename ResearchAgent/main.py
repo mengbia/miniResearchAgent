@@ -19,9 +19,12 @@ from rag.vector_store import local_kb
 
 # 引入 LangGraph 和 基础消息类型
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langgraph.prebuilt import create_react_agent
 from agents.deep_graph import deep_research_graph
 from agents.chat_agent import normal_chat_agent
+from agents.chat_agent import tools
 from core.llm import get_llm  # 🌟 引入基础大脑用于闲聊
+from core.prompt_manager import prompt_manager
 
 #日志
 from core.logger import logger, trace_agent_event, log_user_interaction
@@ -77,10 +80,18 @@ async def upload_document(file: UploadFile = File(...)):
 
 
 @app.post("/api/chat")
-async def chat_endpoint(request: ChatRequest):
+async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks):
     user_query = request.messages[-1].content
     mode = request.mode  # 🌟 获取前端当前的模式
     print(f"\n🚀 接收到提问: {user_query} | 当前模式: {mode}")
+
+    #组装前端传来的历史聊天记录
+    history = []
+    for msg in request.messages:
+        if msg.role == "user":
+            history.append(HumanMessage(content=msg.content))
+        else:
+            history.append(AIMessage(content=msg.content))
 
     # ==========================================
     # 🌟 长期记忆 (LTM)：触发后台静默提取
