@@ -12,6 +12,8 @@ from agents.tools import get_web_search_tool
 from agents.state import AgentState
 from rag.vector_store import local_kb
 
+from core.prompt_manager import prompt_manager
+
 llm = get_llm()
 search_tool = get_web_search_tool(max_results=3)
 
@@ -25,23 +27,19 @@ async def safe_web_search(keyword: str):
 async def init_system_node(state: AgentState):
     """全局系统起点：注入系统提示词与人设"""
     print("\n[System] 🌟 正在初始化深度研究网络...")
-    sys_msg = SystemMessage(content="你是顶尖的AI研究团队。所有操作必须基于事实，严禁幻觉。对于缺乏资料的问题，请主动要求补充检索。")
-    # 只需要返回你想“追加”或“更新”的状态
+    # 🌟 动态获取
+    prompt_text = prompt_manager.get("deep_graph", "init_system")
+    sys_msg = SystemMessage(content=prompt_text)
     return {"messages": [sys_msg], "loop_count": 0, "sources": []}
 
 async def planner_node(state: AgentState):
     """规划师：不仅生成关键词，还给任务打上【路由标签】"""
     query = state["user_query"]
-    # 取出之前 Reviewer 可能给出的补充意见
     history_context = "\n".join([m.content for m in state.get("messages", []) if isinstance(m, AIMessage)])
     
-    prompt = f"""用户研究主题：{query}
-参考过往意见：{history_context}
-请制定最多3个搜索关键词。并且为每个词打上标签：
-如果需要查最新时事/宽泛知识，打上 [WEB]；
-如果需要查用户私有文档/具体本地合同，打上 [LOCAL]；
-如果都需要，打上 [ALL]。
-格式示例：[WEB]马斯克最新推文, [LOCAL]2023年财务报表"""
+    # 🌟 动态获取并注入变量
+    template = prompt_manager.get("deep_graph", "planner")
+    prompt = template.format(query=query, history_context=history_context)
 
     response = await llm.ainvoke([HumanMessage(content=prompt)])
     keywords = response.content.split(",")
@@ -56,7 +54,7 @@ async def planner_node(state: AgentState):
     return {"plan": plan_list}
 
 # ==========================================
-# 2. 核心魔法：并行路由 (Dynamic Router)
+# 2. 并行路由 (Dynamic Router)
 # ==========================================
 def route_specialists(state: AgentState):
     """交通警察：决定图谱下一步激活哪些节点。如果返回列表，图谱就会并发执行！"""
@@ -79,7 +77,7 @@ def route_specialists(state: AgentState):
 # 3. 特种部队节点 (Specialist Agents)
 # ==========================================
 async def web_specialist_node(state: AgentState):
-    """外网特工：只负责查外网"""
+    """只负责查外网"""
     print("[Web Specialist] 🌐 外网特工出动...")
     plans = state.get("plan", [])
     sources = []
@@ -102,7 +100,7 @@ async def web_specialist_node(state: AgentState):
     return {"sources": sources}
 
 async def local_specialist_node(state: AgentState):
-    """内网特工：只负责查本地向量库"""
+    """只负责查本地向量库"""
     print("[Local Specialist] 📁 内网特工出动...")
     plans = state.get("plan", [])
     sources = []
@@ -144,10 +142,12 @@ async def filter_node(state: AgentState):
 async def writer_node(state: AgentState):
     """撰稿人"""
     query = state["user_query"]
-    sources = state.get("sources", [])[-10:] # 只取最后（最新）的10条防止超载
-    
+    sources = state.get("sources", [])[-10:]
     context = "\n".join([f"- [{s['title']}]({s['url']}): {s['snippet']}" for s in sources])
-    prompt = f"用户提问：{query}\n情报资料：\n{context}\n请基于事实撰写深度Markdown报告。"
+    
+    # 🌟 动态获取并注入变量
+    template = prompt_manager.get("deep_graph", "writer")
+    prompt = template.format(query=query, context=context)
     
     print("\n[Writer] ✍️ 正在奋笔疾书...")
     response = await llm.ainvoke([SystemMessage(content=prompt)])
@@ -159,12 +159,16 @@ async def writer_node(state: AgentState):
 async def reviewer_node(state: AgentState):
     """审查员"""
     loop_count = state.get("loop_count", 0)
-    if loop_count >= 2:
-        return {"loop_count": loop_count + 1}
+    if loop_count >= 2: return {"loop_count": loop_count + 1}
         
     print(f"\n[Reviewer] 🧐 严厉审查第 {loop_count + 1} 版报告...")
     report = state.get("report", "")
-    response = await llm.ainvoke([SystemMessage(content=f"审阅以下报告，如有关键事实缺失请输出FAIL，否则输出PASS。\n{report[:2000]}")])
+    
+    # 🌟 动态获取并注入变量
+    template = prompt_manager.get("deep_graph", "reviewer")
+    prompt = template.format(report=report[:2000])
+    
+    response = await llm.ainvoke([SystemMessage(content=prompt)])
     
     if "FAIL" in response.content.upper():
         print("[Reviewer] ❌ 发现信息断层，打回重做！")
