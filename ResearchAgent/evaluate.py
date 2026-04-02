@@ -145,8 +145,8 @@ async def run_anthropic_evals():
     ])
 
     if results['trajectory_pass'] == results['total'] and results['output_pass'] == results['total']:
-        conclusion = "💡 **结论**: 完美通过！你的 Agent 表现极佳，达到了企业级发布标准！"
-        print("💡 结论: 完美通过！你的 Agent 表现极佳，达到了企业级发布标准！")
+        conclusion = "💡 **结论**: 完美通过！你的 Agent 表现极佳，达到了发布标准！"
+        print("💡 结论: 完美通过！你的 Agent 表现极佳，达到了发布标准！")
     else:
         conclusion = "💡 **结论**: 还有优化空间，请根据失败用例的裁判理由，调整对应的系统提示词或工具描述。"
         print("💡 结论: 还有优化空间，请根据失败用例的裁判理由，调整对应的系统提示词或工具描述。")
