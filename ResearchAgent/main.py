@@ -30,6 +30,10 @@ from agents.chat_agent import tools
 from core.llm import get_llm  # 🌟 引入基础大脑用于闲聊
 from core.prompt_manager import prompt_manager
 
+# 防目录遍历漏洞
+import uuid # 引入uuid
+import re   # 引入正则
+
 #日志
 from core.logger import logger, trace_agent_event, log_user_interaction
 
@@ -66,21 +70,29 @@ class ChatRequest(BaseModel):
 @app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
     try:
-        # 1. 保存用户上传的文件到本地 uploads 文件夹
-        file_path = os.path.join(UPLOAD_DIR, file.filename)
+        # ==========================================
+        # 🌟 安全改造：防目录遍历漏洞 (Path Traversal)
+        # ==========================================
+        # 1. 过滤危险字符，仅保留中英文字母、数字、点、下划线和连字符
+        safe_original_name = re.sub(r'[^\w\.\-\u4e00-\u9fa5]', '', file.filename)
+        if not safe_original_name:
+            safe_original_name = "unnamed_document.txt"
+            
+        # 2. 拼接短 UUID 作为前缀，既防攻击，又防同名文件覆盖
+        safe_filename = f"{uuid.uuid4().hex[:8]}_{safe_original_name}"
+        file_path = os.path.join(UPLOAD_DIR, safe_filename)
+        
+        # 3. 安全保存落盘
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
-        print(f"\n📥 收到新文件上传: {file.filename}")
+        print(f"\n📥 收到新文件上传: [原名] {file.filename} -> [安全落盘] {safe_filename}")
         
-        # 2. 调用我们在 rag/vector_store.py 里写好的入库逻辑
+        # 4. 调用入库逻辑 (此时传入的是绝对安全的物理路径)
         await asyncio.to_thread(local_kb.process_and_save_document, file_path)
         
+        # 返回给前端的依然是原始名，保证用户体验
         return {"status": "success", "message": f"文件 {file.filename} 解析并入库成功！Agent现在可以参考它了。"}
-        
-    except Exception as e:
-        print(f"❌ 上传解析失败: {e}")
-        return {"status": "error", "message": f"处理失败: {str(e)}"}
 
 
 @app.post("/api/chat")
