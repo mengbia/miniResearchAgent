@@ -220,6 +220,13 @@ workflow.add_edge("writer", "reviewer")
 # 连线：审查员的“回头草”条件分支
 workflow.add_conditional_edges("reviewer", review_router, {"planner": "planner", "end": END})
 
+
+import os
+
+# 在根目录创建一个独立的 SQLite 数据库文件来保存所有任务的状态
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "research_checkpoints.db")
+
+# 编译时注入 checkpointer！从现在起，图谱走的每一步都会实时自动落盘。
 deep_research_graph = workflow.compile()
 
 
@@ -228,22 +235,22 @@ deep_research_graph = workflow.compile()
 if __name__ == "__main__":
     import asyncio
     import sys
+    import uuid # 引入 UUID
 
     async def main():
-        print("🚀 正在独立测试多智能体 LangGraph 网络...")
+        print("🚀 正在独立测试多智能体 LangGraph 网络(带容灾持久化)...")
         
-        # 模拟用户提问并初始化完整状态字典
         test_state = {
-            "user_query": "2026年固态电池的最新商业化进展，并结合本地库信息进行对比", 
-            "messages": [],
-            "plan": [],
-            "sources": [],
-            "report": "",
-            "loop_count": 0
+            "user_query": "2026年固态电池的最新商业化进展", 
+            "messages": [], "plan": [], "sources": [], "report": "", "loop_count": 0
         }
         
-        # 运行整个图网络 (由于节点全是 async，这里使用 ainvoke)
-        result = await deep_research_graph.ainvoke(test_state)
+        # 🌟 核心：使用 checkpointer 后，必须传入 thread_id！
+        # 这样系统才知道当前是在跑哪个任务，重启后只要 thread_id 相同就能无缝接上
+        test_thread_id = str(uuid.uuid4())
+        run_config = {"configurable": {"thread_id": test_thread_id}}
+        
+        result = await deep_research_graph.ainvoke(test_state, config=run_config)
         
         print("\n" + "="*50)
         print("🏁 测试运行结束！")

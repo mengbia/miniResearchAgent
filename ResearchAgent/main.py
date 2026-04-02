@@ -17,10 +17,14 @@ import shutil
 from fastapi import FastAPI, UploadFile, File
 from rag.vector_store import local_kb
 
+# 进程断点保护
+from agents.deep_graph import deep_research_graph, workflow, DB_PATH # 🌟 导入 workflow 和 DB_PATH
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver # 🌟 导入异步持久化组件
+import uuid 
+
 # 引入 LangGraph 和 基础消息类型
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.prebuilt import create_react_agent
-from agents.deep_graph import deep_research_graph
 from agents.chat_agent import normal_chat_agent
 from agents.chat_agent import tools
 from core.llm import get_llm  # 🌟 引入基础大脑用于闲聊
@@ -31,7 +35,7 @@ from core.logger import logger, trace_agent_event, log_user_interaction
 
 app = FastAPI(title="Deep Research Agent Backend")
 
-# 新增根接口，解决无限加载
+# 🌟 根接口，解决无限加载
 @app.get("/")
 async def root():
     return {"message": "Deep Research Agent 后端服务运行成功！", "docs": "/docs"}
@@ -114,34 +118,44 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
 
     async def agent_stream():
         try:
-            # ==========================================
+           # ==========================================
             # 分支 1：深度研究模式 (跑复杂的 LangGraph 图)
             # ==========================================
             if mode == "deep":
                 state = {"user_query": user_query, "messages": [], "plan": [], "sources": [], "report": ""}
-                async for event in deep_research_graph.astream_events(state, version="v2"):
-                     # 🌟 解耦追踪！把事件直接抛给日志模块
-                    trace_agent_event(event)
+                
+                # 🌟 获取任务 ID
+                task_id = request.messages[-1].id if request.messages[-1].id else str(uuid.uuid4())
+                run_config = {"configurable": {"thread_id": task_id}}
 
-                    kind = event["event"]
-                    node_name = event.get("metadata", {}).get("langgraph_node", "")
+                # 🌟 使用异步上下文管理器
+                async with AsyncSqliteSaver.from_conn_string(DB_PATH) as memory_saver:
+                    persistent_graph = workflow.compile(checkpointer=memory_saver)
                     
-                    if kind == "on_chain_end" and node_name == "planner":
-                        plan_data = event["data"]["output"].get("plan", [])
-                        yield f"data: {json.dumps({'type': 'plan_created', 'content': plan_data}, ensure_ascii=False)}\n\n"
+                    # 使用 persistent_graph 代替 deep_research_graph
+                    async for event in persistent_graph.astream_events(state, config=run_config, version="v2"):
+                        # 🌟 解耦追踪！把事件直接抛给日志模块
+                        trace_agent_event(event)
+
+                        kind = event["event"]
+                        node_name = event.get("metadata", {}).get("langgraph_node", "")
                         
-                    elif kind == "on_chain_start" and node_name == "worker":
-                        yield f"data: {json.dumps({'type': 'tool_start', 'content': {'input': '正在全网深度检索中...'}}, ensure_ascii=False)}\n\n"
-                        
-                    elif kind == "on_chain_end" and node_name == "worker":
-                        yield f"data: {json.dumps({'type': 'tool_end'})}\n\n"
-                        sources_data = event["data"]["output"].get("sources", [])
-                        yield f"data: {json.dumps({'type': 'sources', 'content': sources_data}, ensure_ascii=False)}\n\n"
-                        
-                    elif kind == "on_chat_model_stream" and node_name == "writer":
-                        chunk = event["data"]["chunk"].content
-                        if chunk:
-                            yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
+                        if kind == "on_chain_end" and node_name == "planner":
+                            plan_data = event["data"]["output"].get("plan", [])
+                            yield f"data: {json.dumps({'type': 'plan_created', 'content': plan_data}, ensure_ascii=False)}\n\n"
+                            
+                        elif kind == "on_chain_start" and node_name == "worker":
+                            yield f"data: {json.dumps({'type': 'tool_start', 'content': {'input': '正在全网深度检索中...'}}, ensure_ascii=False)}\n\n"
+                            
+                        elif kind == "on_chain_end" and node_name == "worker":
+                            yield f"data: {json.dumps({'type': 'tool_end'})}\n\n"
+                            sources_data = event["data"]["output"].get("sources", [])
+                            yield f"data: {json.dumps({'type': 'sources', 'content': sources_data}, ensure_ascii=False)}\n\n"
+                            
+                        elif kind == "on_chat_model_stream" and node_name == "writer":
+                            chunk = event["data"]["chunk"].content
+                            if chunk:
+                                yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
                             
             # ==========================================
             # 分支 2：普通闲聊模式 (企业级 Agentic RAG 版)

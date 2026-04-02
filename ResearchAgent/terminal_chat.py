@@ -1,9 +1,10 @@
 import asyncio
 import sys
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver # 🌟 导入异步持久化组件
 
 # 导入图谱与基础组件
-from agents.deep_graph import deep_research_graph
+from agents.deep_graph import deep_research_graph, workflow, DB_PATH , workflow, DB_PATH # 🌟 导入 workflow 和 DB_PATH
 from langgraph.prebuilt import create_react_agent
 from core.llm import get_llm
 from agents.chat_agent import tools  # 🌟 导入工具箱
@@ -105,7 +106,34 @@ async def main():
             elif mode == "deep":
                 # 深度模式目前还是单次提问执行 (也可以根据需要把 chat_history 传进去供 Planner 参考)
                 state = {"user_query": user_input, "messages": chat_history, "plan": [], "sources": [], "report": "", "loop_count": 0}
-                async for event in deep_research_graph.astream_events(state, version="v2"):
+
+                # 🌟为当前对话生成或指定一个 thread_id
+                # 在终端调试中，我们可以用固定的 ID，这样如果你强行 Ctrl+C 中断，下次运行还会接着刚才的进度！
+                run_config = {"configurable": {"thread_id": "terminal_debug_thread_01"}}
+                
+                # 🌟 使用异步上下文管理器，安全挂载 SQLite
+                async with AsyncSqliteSaver.from_conn_string(DB_PATH) as memory_saver:
+                    # 💡 动态编译带记忆硬盘的图谱
+                    persistent_graph = workflow.compile(checkpointer=memory_saver)
+                    
+                    # 使用 persistent_graph 代替之前的 deep_research_graph
+                    async for event in persistent_graph.astream_events(state, config=run_config, version="v2"):
+                        trace_agent_event(event)
+                        kind = event["event"]
+                        node_name = event.get("metadata", {}).get("langgraph_node", "")
+                        
+                        if kind == "on_chain_end" and node_name == "planner":
+                            print("\n   [📋 计划已生成，开始执行]...", end="\n   ")
+                        elif kind == "on_chain_start" and node_name == "worker":
+                            print("\n   [🌐 正在全网与知识库混合检索]...", end="\n   ")
+                        elif kind == "on_chat_model_stream" and node_name == "writer":
+                            chunk = event["data"]["chunk"].content
+                            if isinstance(chunk, str):
+                                print(chunk, end="", flush=True)
+                                final_answer += chunk
+
+                # 🌟 传入 config
+                async for event in deep_research_graph.astream_events(state, config=run_config, version="v2"):
                     trace_agent_event(event)
                     kind = event["event"]
                     node_name = event.get("metadata", {}).get("langgraph_node", "")
