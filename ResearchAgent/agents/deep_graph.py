@@ -176,7 +176,8 @@ async def reviewer_node(state: AgentState):
         print("[Reviewer] ❌ 发现信息断层，打回重做！")
         return {
             "loop_count": loop_count + 1,
-            "messages": [AIMessage(content=f"打回理由：{response.content}")] # 追加消息
+            # 🌟 强化语气：让 Planner 知道这是不可违抗的搜索策略指导
+            "messages": [AIMessage(content=f"【审查员强制指令与下一步搜索建议】：\n{response.content}")] 
         }
     print("[Reviewer] ✅ 审查通过！")
     return {"loop_count": loop_count + 1}
