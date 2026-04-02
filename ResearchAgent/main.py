@@ -128,30 +128,37 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                 task_id = request.messages[-1].id if request.messages[-1].id else str(uuid.uuid4())
                 run_config = {"configurable": {"thread_id": task_id}}
 
-                # 🌟 使用异步上下文管理器
                 async with AsyncSqliteSaver.from_conn_string(DB_PATH) as memory_saver:
                     persistent_graph = workflow.compile(checkpointer=memory_saver)
                     
-                    # 使用 persistent_graph 代替 deep_research_graph
                     async for event in persistent_graph.astream_events(state, config=run_config, version="v2"):
-                        # 🌟 解耦追踪！把事件直接抛给日志模块
                         trace_agent_event(event)
 
                         kind = event["event"]
+                        # langgraph_node 表示当前在哪个大节点里运行
                         node_name = event.get("metadata", {}).get("langgraph_node", "")
+                        # name 表示当前具体是哪个组件（比如节点本身、或者内部的某个大模型）触发了事件
+                        current_name = event.get("name", "") 
                         
-                        if kind == "on_chain_end" and node_name == "planner":
-                            plan_data = event["data"]["output"].get("plan", [])
-                            yield f"data: {json.dumps({'type': 'plan_created', 'content': plan_data}, ensure_ascii=False)}\n\n"
+                    
+                        if kind == "on_chain_end" and current_name == "planner":
+                            output = event["data"].get("output", {})
+                            # 加入类型保护，防止 AIMessage 引发崩溃
+                            if isinstance(output, dict) and "plan" in output:
+                                yield f"data: {json.dumps({'type': 'plan_created', 'content': output['plan']}, ensure_ascii=False)}\n\n"
+                                
+                
+                        elif kind == "on_chain_start" and current_name in ["web_specialist", "local_specialist"]:
+                            tool_name = "全网深度检索" if current_name == "web_specialist" else "本地内部库检索"
+                            yield f"data: {json.dumps({'type': 'tool_start', 'content': {'input': f'特工出动：正在执行{tool_name}...'}}, ensure_ascii=False)}\n\n"
                             
-                        elif kind == "on_chain_start" and node_name == "worker":
-                            yield f"data: {json.dumps({'type': 'tool_start', 'content': {'input': '正在全网深度检索中...'}}, ensure_ascii=False)}\n\n"
-                            
-                        elif kind == "on_chain_end" and node_name == "worker":
+                        elif kind == "on_chain_end" and current_name in ["web_specialist", "local_specialist"]:
                             yield f"data: {json.dumps({'type': 'tool_end'})}\n\n"
-                            sources_data = event["data"]["output"].get("sources", [])
-                            yield f"data: {json.dumps({'type': 'sources', 'content': sources_data}, ensure_ascii=False)}\n\n"
-                            
+                            output = event["data"].get("output", {})
+                            if isinstance(output, dict) and "sources" in output:
+                                yield f"data: {json.dumps({'type': 'sources', 'content': output['sources']}, ensure_ascii=False)}\n\n"
+                                
+                        # 🌟 Writer 节点依然通过 node_name 捕获其内部大模型实时打字的流式数据
                         elif kind == "on_chat_model_stream" and node_name == "writer":
                             chunk = event["data"]["chunk"].content
                             if chunk:
@@ -183,7 +190,7 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                 state = {"messages": history} # 这里的 history 已经是滑动窗口截断过的了
                 
                 # 3. 🌟 启动监听器，实时把 Agent 思考和调用工具的过程发给前端
-                async for event in normal_chat_agent.astream_events(state, version="v2"):
+                async for event in memory_aware_agent.astream_events(state, version="v2"):
                    
                     # 🌟 无侵入式解耦追踪！
                     trace_agent_event(event)

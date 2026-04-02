@@ -224,7 +224,9 @@ workflow.add_conditional_edges("reviewer", review_router, {"planner": "planner",
 import os
 
 # 在根目录创建一个独立的 SQLite 数据库文件来保存所有任务的状态
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "research_checkpoints.db")
+if not os.path.exists("checkpoints"):
+    os.makedirs("checkpoints")
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "checkpoints", "research_checkpoints.db")
 
 # 编译时注入 checkpointer！从现在起，图谱走的每一步都会实时自动落盘。
 deep_research_graph = workflow.compile()
