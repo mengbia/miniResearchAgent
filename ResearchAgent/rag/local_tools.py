@@ -8,7 +8,7 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 
 @tool
 def list_local_files() -> str:
-    """获取当前本地知识库中已上传的所有文件列表（文件名）。当用户问“有什么文件”、“上传了哪些文件”时调用此工具。"""
+    """获取当前本地知识库中已上传的所有文件列表。当用户问'有什么文件'时调用。注意：如果用户已经明确说出了文件名并要求读取，【绝对不要】调用此工具进行确认，请直接去读文件！"""
     # 🌟 直接读取操作系统目录，O(1) 复杂度，告别 Chroma 全表扫描！
     if not os.path.exists(UPLOAD_DIR):
         return "当前本地知识库没有任何文件。"
