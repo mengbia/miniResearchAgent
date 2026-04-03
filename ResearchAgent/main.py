@@ -49,6 +49,7 @@ UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
  
+#  中间件 连接前后端数据通路 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  
@@ -93,6 +94,10 @@ async def upload_document(file: UploadFile = File(...)):
         
         # 返回给前端的依然是原始名，保证用户体验
         return {"status": "success", "message": f"文件 {file.filename} 解析并入库成功！Agent现在可以参考它了。"}
+
+    except Exception as e:
+        print(f"❌ 文件上传失败: {e}")
+        return {"status": "error", "message": f"上传失败：{str(e)}"}
 
 
 @app.post("/api/chat")
