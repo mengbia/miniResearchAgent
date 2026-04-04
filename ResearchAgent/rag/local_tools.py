@@ -1,6 +1,6 @@
 import os
 from langchain_core.tools import tool
-from rag.vector_store import local_kb
+from vector_store import local_kb
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader, UnstructuredMarkdownLoader
 
 # 🌟 将 uploads 文件夹作为我们的轻量级 "OSS/S3" 和 "MySQL"
@@ -8,7 +8,7 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 
 @tool
 def list_local_files() -> str:
-    """获取当前本地知识库中已上传的所有文件列表。当用户问'有什么文件'时调用。注意：如果用户已经明确说出了文件名并要求读取，【绝对不要】调用此工具进行确认，请直接去读文件！"""
+    """获取当前本地知识库中已上传的所有文件列表。当用户问'有什么文件'时调用。注意：如果用户已经明确说出了文件名或语义相同的文件名并要求读取，【绝对不要】调用此工具进行确认，请直接去读文件！"""
     # 🌟 直接读取操作系统目录，O(1) 复杂度，告别 Chroma 全表扫描！
     if not os.path.exists(UPLOAD_DIR):
         return "当前本地知识库没有任何文件。"
@@ -69,3 +69,15 @@ def read_full_document(filename: str) -> str:
         
     except Exception as e:
         return f"读取物理文件失败: {e}"
+
+if __name__ == "__main__" :
+    # 打印你的3个工具，看诞生后的模样！
+    print("=== 工具1 list_local_files ===")
+    print(list_local_files)          # 工具对象
+    print("名称:", list_local_files.name)
+    print("说明书:", list_local_files.description)
+    print("参数:", list_local_files.args)
+
+    print("\n=== 工具2 search_local_content ===")
+    print(search_local_content.name)
+    print(search_local_content.description)

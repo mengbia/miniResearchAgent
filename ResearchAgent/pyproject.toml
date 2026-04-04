@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ResearchAgent"
+version = "0.1.0"
+
+# 👇 核心：手动声明你要导入的Python包
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rag", "core", "agents", "prompts"]  # 你的业务代码包
+exclude = ["logs", "uploads", "checkpoints", "chroma_data", "evaluation_result"]  # 数据/日志目录排除
