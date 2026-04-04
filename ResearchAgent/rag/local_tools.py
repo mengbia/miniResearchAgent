@@ -71,8 +71,9 @@ def read_full_document(filename: str) -> str:
         return f"读取物理文件失败: {e}"
 
 if __name__ == "__main__" :
-    # 打印你的3个工具，看诞生后的模样！
+    # 打印工具
     print("=== 工具1 list_local_files ===")
+    print("·········LLM看到的格式·············")
     print(list_local_files)          # 工具对象
     print("名称:", list_local_files.name)
     print("说明书:", list_local_files.description)
