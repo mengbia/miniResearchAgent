@@ -11,9 +11,9 @@ from langchain_community.document_loaders import (
 )
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 # 为阿里云官方嵌入模型
-from langchain_community.embeddings import DashScopeEmbeddings
 from langchain_chroma import Chroma
 from core.config import LLM_API_KEY, LLM_API_BASE, LLM_MODEL_NAME, BACKUP_LLM_MODEL_EMBEDDING
+from core.llm import get_embeddings
 
 # 知识库保存在本地的路径
 CHROMA_PERSIST_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "chroma_data")

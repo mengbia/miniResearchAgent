@@ -4,7 +4,7 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver # 🌟 导入异步持久化组件
 
 # 导入图谱与基础组件
-from agents.deep_graph import deep_research_graph, workflow, DB_PATH , workflow, DB_PATH # 🌟 导入 workflow 和 DB_PATH
+from agents.deep_graph import deep_research_graph, workflow, DB_PATH # 🌟 导入 workflow 和 DB_PATH
 from langgraph.prebuilt import create_react_agent
 from core.llm import get_llm
 from agents.chat_agent import tools  # 🌟 导入工具箱
