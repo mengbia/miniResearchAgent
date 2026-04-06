@@ -27,27 +27,30 @@ class UserMemoryStore:
 
     async def async_extract_and_save(self, user_input: str):
         """异步执行：分析用户输入，如果是重要偏好，则存入 Chroma"""
-        # 1. 加载提取器提示词
         template = prompt_manager.get("memory", "extractor")
         prompt = template.format(user_input=user_input)
         
         try:
-            # 2. 让大模型判断这句话值不值得记下来
+            # 🌟 1. 尝试大模型提取 (如果主模型欠费，这里会自动触发 fallback_llm)
             response = await self.llm.ainvoke([SystemMessage(content=prompt)])
             memory_fact = response.content.strip()
             
-            # 3. 如果大模型判定是有用事实，则向量化入库
             if memory_fact and memory_fact.lower() != "none":
                 print(f"🧠 [长期记忆捕获]: {memory_fact}")
-                # 生成唯一 ID 防止重复
                 doc_id = str(uuid.uuid4())
-                self.vector_store.add_texts(
-                    texts=[memory_fact], 
-                    ids=[doc_id],
-                    metadatas=[{"source": "user_chat"}]
-                )
+                
+                try:
+                    # 🌟 2. 尝试向量入库 (单独隔离：防止阿里云 Embedding 模型也欠费导致程序崩溃)
+                    self.vector_store.add_texts(
+                        texts=[memory_fact], 
+                        ids=[doc_id],
+                        metadatas=[{"source": "user_chat"}]
+                    )
+                except Exception as emb_e:
+                    print(f"⚠️ [警告] 记忆已提取，但向量入库失败 (通常是因为 Embedding 模型也欠费了): {emb_e}")
+                    
         except Exception as e:
-            print(f"❌ 记忆提取失败: {e}")
+            print(f"❌ 记忆提取大模型彻底崩溃 (主备模型均失败): {e}")
 
     def retrieve_memory(self, query: str, top_k: int = 3) -> str:
         """提问前执行：根据当前问题，去向量库捞取相关的长期记忆"""

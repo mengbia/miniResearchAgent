@@ -5,13 +5,19 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 获取大模型配置
-LLM_API_KEY = os.getenv("OPENAI_API_KEY")
-LLM_API_BASE = os.getenv("OPENAI_API_BASE")
-LLM_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME")
-
+LLM_API_KEY = os.getenv("BACKUP_API_KEY")
+LLM_API_BASE = os.getenv("BACKUP_API_BASE")
+LLM_MODEL_NAME = os.getenv("BACKUP_MODEL_NAME")
+LLM_MODEL_EMBEDDING = os.getenv("BACKUP_MODEL_EMBEDDING", "qwen-max")
 #文本嵌入模型
-DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
+DASHSCOPE_API_KEY = os.getenv("BACKUP_DASHSCOPE_API_KEY")
 
+# 备用大模型
+BACKUP_API_KEY = os.getenv("BACKUP_API_KEY")
+BACKUP_API_BASE = os.getenv("BACKUP_API_KEY")
+BACKUP_MODEL_NAME = os.getenv("BACKUP_API_KEY")
+BACKUP_LLM_MODEL_EMBEDDING = os.getenv("BACKUP_MODEL_EMBEDDING", "qwen-max")
+BACKUP_DASHSCOPE_API_KEY = os.getenv("BACKUP_DASHSCOPE_MODEL_EMBEDDING")
 
 # 获取 Tavily 搜索配置
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
