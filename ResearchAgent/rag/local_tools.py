@@ -1,6 +1,6 @@
 import os
 from langchain_core.tools import tool
-from vector_store import local_kb
+from rag.vector_store import local_kb
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, Docx2txtLoader, UnstructuredMarkdownLoader
 
 # 🌟 将 uploads 文件夹作为我们的轻量级 "OSS/S3" 和 "MySQL"

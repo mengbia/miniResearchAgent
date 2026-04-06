@@ -1,7 +1,7 @@
 from langchain_core.messages import SystemMessage
 from langgraph.prebuilt import create_react_agent
 from core.llm import get_llm
-from agents.tools import get_web_search_tool
+from agents.tools import get_web_search_tool, arxiv_search_tool, read_excel_csv_tool
 from rag.local_tools import list_local_files, search_local_content, read_full_document
 
 # 🌟 引入提示词管理器
@@ -13,7 +13,9 @@ tools = [
     get_web_search_tool(max_results=3), 
     list_local_files, 
     search_local_content, 
-    read_full_document
+    read_full_document,
+    arxiv_search_tool,       
+    read_excel_csv_tool
 ]
 
 # 🌟 动态加载提示词

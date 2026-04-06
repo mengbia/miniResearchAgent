@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from core.llm import get_llm
-from agents.tools import get_web_search_tool
+from agents.tools import get_web_search_tool, arxiv_search_tool, read_excel_csv_tool
 from agents.state import AgentState
 from rag.vector_store import local_kb
 
@@ -57,21 +57,24 @@ async def planner_node(state: AgentState):
 # 2. 并行路由 (Dynamic Router)
 # ==========================================
 def route_specialists(state: AgentState):
-    """交通警察：决定图谱下一步激活哪些节点。如果返回列表，图谱就会并发执行！"""
+    """交通警察：决定图谱下一步激活哪些节点。"""
     plans = state.get("plan", [])
     routes = set()
     
     for p in plans:
         title = p["title"].upper()
         if "[WEB]" in title: routes.add("web_specialist")
-        elif "[LOCAL]" in title: routes.add("local_specialist")
-        else: # 默认为 ALL
-            routes.add("web_specialist")
-            routes.add("local_specialist")
+        if "[LOCAL]" in title: routes.add("local_specialist")
+        if "[ARXIV]" in title: routes.add("arxiv_specialist") 
+        if "[DATA]" in title: routes.add("data_specialist")  
+        if "[ALL]" in title:
+            routes.update(["web_specialist", "local_specialist", "arxiv_specialist", "data_specialist"])
             
-    print(f"\n[Router] 🚦 侦测到任务属性，即将并发唤醒特种部队: {list(routes)}")
-    # LangGraph 魔法：返回包含多个节点名的列表，就会开启真实的多线程并行！
-    return list(routes) 
+    if not routes:
+        routes.add("web_specialist") # 兜底机制
+        
+    print(f"\n[Router] 🚦 侦测到任务属性，即将并发唤醒特种部队节点: {list(routes)}")
+    return list(routes)
 
 # ==========================================
 # 3. 特种部队节点 (Specialist Agents)
@@ -119,6 +122,49 @@ async def local_specialist_node(state: AgentState):
                 })
         except Exception as e:
             print(f"内网检索异常: {e}")
+            
+    return {"sources": sources}
+
+async def arxiv_specialist_node(state: AgentState):
+    """学术特工：专职从 Arxiv 检索论文"""
+    print("[Arxiv Specialist] 🎓 学术特工出动...")
+    plans = state.get("plan", [])
+    sources = []
+    for p in plans:
+        if "[ARXIV]" not in p["title"].upper() and "[ALL]" not in p["title"].upper(): continue
+        keyword = p["title"].replace("[ARXIV]", "").replace("[ALL]", "").strip()
+        
+        try:
+            # 🌟 扔进后台线程池执行
+            res = await asyncio.to_thread(arxiv_search_tool.invoke, keyword)
+            sources.append({
+                "title": f"[学术论文] {keyword}",
+                "url": "Arxiv 学术数据库",
+                "snippet": str(res)[:600]
+            })
+        except Exception as e:
+            print(f"学术检索异常: {e}")
+            
+    return {"sources": sources}
+
+async def data_specialist_node(state: AgentState):
+    """数据特工：专职读取和分析表格"""
+    print("[Data Specialist] 📊 数据特工出动...")
+    plans = state.get("plan", [])
+    sources = []
+    for p in plans:
+        if "[DATA]" not in p["title"].upper() and "[ALL]" not in p["title"].upper(): continue
+        keyword = p["title"].replace("[DATA]", "").replace("[ALL]", "").strip()
+        
+        try:
+            res = await asyncio.to_thread(read_excel_csv_tool.invoke, keyword)
+            sources.append({
+                "title": f"[表格数据] {keyword}",
+                "url": "本地文件系统",
+                "snippet": str(res)[:1000] # 数据保留长一点，方便大模型分析
+            })
+        except Exception as e:
+            print(f"表格读取异常: {e}")
             
     return {"sources": sources}
 
@@ -199,6 +245,8 @@ workflow.add_node("init", init_system_node)
 workflow.add_node("planner", planner_node)
 workflow.add_node("web_specialist", web_specialist_node)
 workflow.add_node("local_specialist", local_specialist_node)
+workflow.add_node("arxiv_specialist", arxiv_specialist_node) # 🌟 注册学术特工
+workflow.add_node("data_specialist", data_specialist_node)   # 🌟 注册数据特工
 workflow.add_node("filter", filter_node)
 workflow.add_node("writer", writer_node)
 workflow.add_node("reviewer", reviewer_node)
@@ -207,31 +255,30 @@ workflow.add_node("reviewer", reviewer_node)
 workflow.add_edge(START, "init")
 workflow.add_edge("init", "planner")
 
-# 连线：动态并行分发 (Planner 查完后，由 Router 决定走哪条路，或者两条路同时走)
-workflow.add_conditional_edges("planner", route_specialists, ["web_specialist", "local_specialist"])
+# 连线：动态并行分发
+# 🌟 Router 会返回一个列表，这里必须列出所有可能的目的地
+workflow.add_conditional_edges("planner", route_specialists, [
+    "web_specialist", "local_specialist", "arxiv_specialist", "data_specialist"
+])
 
-# 连线：海纳百川 (所有特工无论谁先跑完，最终都在 Filter 处汇聚)
+# 连线：海纳百川 (无论唤醒了哪几个特工，最终都在 Filter 汇聚去重)
 workflow.add_edge("web_specialist", "filter")
 workflow.add_edge("local_specialist", "filter")
+workflow.add_edge("arxiv_specialist", "filter") # 🌟 汇聚学术线索
+workflow.add_edge("data_specialist", "filter")  # 🌟 汇聚数据线索
 
 # 连线：后半段直线流程
 workflow.add_edge("filter", "writer")
 workflow.add_edge("writer", "reviewer")
-
-# 连线：审查员的“回头草”条件分支
 workflow.add_conditional_edges("reviewer", review_router, {"planner": "planner", "end": END})
 
-
 import os
-
 # 在根目录创建一个独立的 SQLite 数据库文件来保存所有任务的状态
 if not os.path.exists("checkpoints"):
     os.makedirs("checkpoints")
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "checkpoints", "research_checkpoints.db")
-
-# 编译时注入 checkpointer！从现在起，图谱走的每一步都会实时自动落盘。
+# 动态导出
 deep_research_graph = workflow.compile()
-
 
 
 # ========== 底部测试代码 ==========
