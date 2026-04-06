@@ -20,11 +20,8 @@ CHROMA_PERSIST_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "c
 
 class LocalVectorStore:
     def __init__(self):
-        # 1. 初始化【阿里云通义千问专属】词向量模型
-        self.embeddings = DashScopeEmbeddings(
-            model=BACKUP_LLM_MODEL_EMBEDDING,
-            dashscope_api_key=LLM_API_KEY
-        )
+        # 1. 使用我们自定义的高可用容灾词向量
+        self.embeddings = get_embeddings()
         
         # 2. 连接或创建 ChromaDB 向量数据库
         self.vector_store = Chroma(
@@ -95,47 +92,6 @@ class LocalVectorStore:
         results = self.vector_store.similarity_search(query, k=top_k)
         return results
     
-    '''
-    
-    '''
-    # def get_all_filenames(self):
-    #     """ 获取当前数据库里所有的文件名清单"""
-    #     try:
-    #         results = self.vector_store.get()
-    #         metadatas = results.get("metadatas", [])
-    #         filenames = set()
-    #         for meta in metadatas:
-    #             if meta and "source" in meta:
-    #                 # 兼容 Windows 和 Linux 的路径斜杠
-    #                 name = meta["source"].replace("\\", "/").split("/")[-1]
-    #                 filenames.add(name)
-    #         return list(filenames)
-    #     except Exception as e:
-    #         print(f"获取文件名失败: {e}")
-    #         return []
-
-    # def get_full_document_by_keyword(self, keyword: str, max_chars: int = 6000):
-    #     """绕过向量检索，直接按文件名关键词把内容硬拽出来！"""
-    #     try:
-    #         results = self.vector_store.get()
-    #         metadatas = results.get("metadatas", [])
-    #         documents = results.get("documents", [])
-            
-    #         content = ""
-    #         for i, meta in enumerate(metadatas):
-    #             if meta and "source" in meta:
-    #                 name = meta["source"].replace("\\", "/").split("/")[-1]
-    #                 # 如果文件名包含这个关键词，就把切片内容无脑拼起来
-    #                 if keyword.lower() in name.lower():
-    #                     content += documents[i] + "\n"
-    #                     # 防止文件太大把大模型撑爆，截断一下
-    #                     if len(content) > max_chars:
-    #                         break
-    #         return content[:max_chars]
-    #     except Exception as e:
-    #         print(f"强制提取文件失败: {e}")
-    #         return ""
-
 # 实例化一个单例供全局使用
 local_kb = LocalVectorStore()
 

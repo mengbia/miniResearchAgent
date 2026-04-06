@@ -4,6 +4,8 @@ from langchain_openai import ChatOpenAI
 from core.config import (LLM_API_KEY, LLM_API_BASE, LLM_MODEL_NAME,
                     BACKUP_API_KEY, BACKUP_API_BASE, BACKUP_MODEL_NAME)
 
+from langchain_core.embeddings import Embeddings
+
 # 加载环境变量
 load_dotenv()
 
@@ -53,6 +55,57 @@ def get_llm():
 
     # 如果没配备用密钥，就直接返回主模型
     return main_llm
+
+# ==========================================
+# 🌟 词向量高可用容灾器 (Custom Fallback Embeddings)
+# ==========================================
+class FallbackEmbeddings(Embeddings):
+    """
+    自定义的词向量高可用包装器。
+    当主节点崩溃、限流或欠费时，静默拦截报错，并无缝使用备用节点重新计算向量。
+    """
+    def __init__(self):
+        # 1. 实例化主节点词向量
+        self.main_emb = OpenAIEmbeddings(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("OPENAI_API_BASE"),
+            model="BAAI/bge-m3" 
+        )
+        
+        # 2. 检查并实例化备用节点词向量
+        backup_api_key = os.getenv("BACKUP_API_KEY")
+        backup_api_base = os.getenv("BACKUP_API_BASE")
+        self.backup_emb = None
+        
+        if backup_api_key and backup_api_base:
+            self.backup_emb = OpenAIEmbeddings(
+                api_key=backup_api_key,
+                base_url=backup_api_base,
+                # ⚠️ 注意：这里必须保证主备使用的是同款模型，否则向量维度不匹配会导致 ChromaDB 崩溃！
+                model="BAAI/bge-m3" 
+            )
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        try:
+            return self.main_emb.embed_documents(texts)
+        except Exception as e:
+            if self.backup_emb:
+                print(f"⚠️ [容灾] 主 Embedding 节点异常 ({e})，立刻切换备用节点！")
+                return self.backup_emb.embed_documents(texts)
+            raise e
+
+    def embed_query(self, text: str) -> list[float]:
+        try:
+            return self.main_emb.embed_query(text)
+        except Exception as e:
+            if self.backup_emb:
+                print(f"⚠️ [容灾] 主 Embedding 节点异常 ({e})，立刻切换备用节点！")
+                return self.backup_emb.embed_query(text)
+            raise e
+
+def get_embeddings():
+    """获取全局高可用词向量模型"""
+    return FallbackEmbeddings()
 
 
 #===============测试大模型是否连通===============

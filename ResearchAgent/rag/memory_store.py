@@ -4,7 +4,7 @@ from langchain_chroma import Chroma
 from langchain_community.embeddings import DashScopeEmbeddings
 from core.config import LLM_API_KEY
 from langchain_core.messages import SystemMessage
-from core.llm import get_llm
+from core.llm import get_llm, get_embeddings
 from core.prompt_manager import prompt_manager
 
 # 🌟 为记忆库分配一个独立的持久化目录或 Collection
@@ -13,10 +13,8 @@ MEMORY_PERSIST_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "c
 class UserMemoryStore:
     def __init__(self):
         # 初始化 Embedding 模型 (vector_store.py 里的一样)
-        self.embeddings = DashScopeEmbeddings(
-            model="text-embedding-v2",
-            dashscope_api_key=LLM_API_KEY
-        )
+        self.embeddings = get_embeddings()
+
         # 创建一个专属的 Collection: "long_term_memory"
         self.vector_store = Chroma(
             collection_name="long_term_memory",
