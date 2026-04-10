@@ -1,4 +1,4 @@
-from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_tavily import TavilySearch
 from core.config import TAVILY_API_KEY
 from langchain_core.tools import tool
 
@@ -19,7 +19,7 @@ def get_web_search_tool(max_results: int = 4):
     os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
     
     # 启用 advanced 模式，并尽量拉取长文本 content 
-    search_tool = TavilySearchResults(
+    search_tool = TavilySearch(
         max_results=max_results,
         search_depth="advanced", # 开启高级深度搜索
         include_raw_content=True # 尽可能提取网页正文

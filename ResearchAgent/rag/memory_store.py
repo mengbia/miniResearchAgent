@@ -1,7 +1,6 @@
 import os
 import uuid
 from langchain_chroma import Chroma
-from langchain_community.embeddings import DashScopeEmbeddings
 from core.config import LLM_API_KEY
 from langchain_core.messages import SystemMessage
 from core.llm import get_llm, get_embeddings

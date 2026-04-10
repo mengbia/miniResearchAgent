@@ -5,10 +5,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 获取大模型配置
-LLM_API_KEY = os.getenv("BACKUP_API_KEY")
-LLM_API_BASE = os.getenv("BACKUP_API_BASE")
-LLM_MODEL_NAME = os.getenv("BACKUP_MODEL_NAME")
-LLM_MODEL_EMBEDDING = os.getenv("BACKUP_MODEL_EMBEDDING")
+LLM_API_KEY = os.getenv("OPENAI_API_KEY")
+LLM_API_BASE = os.getenv("OPENAI_API_BASE")
+LLM_MODEL_NAME = os.getenv("OPENAI_MODEL_NAME")
+LLM_MODEL_EMBEDDING = os.getenv("OPENAI_MODEL_EMBEDDING")
 
 # 备用大模型
 BACKUP_API_KEY = os.getenv("BACKUP_API_KEY")
