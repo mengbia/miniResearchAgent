@@ -85,12 +85,24 @@ async def web_specialist_node(state: AgentState):
     plans = state.get("plan", [])
     sources = []
     for p in plans:
-        if "[LOCAL]" in p["title"].upper(): continue # 不归我管
+        if "[LOCAL]" in p["title"].upper(): continue 
         keyword = p["title"].replace("[WEB]", "").replace("[ALL]", "").strip()
         
         try:
             web_results = await safe_web_search(keyword)
-            for res in web_results:
+            
+
+            # 检查它是不是字典，且里面有没有 'results' 这个键
+            if isinstance(web_results, dict) and "results" in web_results:
+                search_data = web_results["results"]
+            # 兼容旧版本直接返回列表的情况
+            elif isinstance(web_results, list):
+                search_data = web_results
+            else:
+                search_data = []
+
+            # 现在 search_data 一定是纯正的列表了
+            for res in search_data:
                 sources.append({
                     "title": f"[全网] {res.get('title', '')}",
                     "url": res.get("url", ""),
@@ -99,7 +111,6 @@ async def web_specialist_node(state: AgentState):
         except Exception as e:
             print(f"外网检索异常: {e}")
             
-    # 由于我们在 state.py 用了 operator.add，这里的 return 会把 sources 追加进去，而不是覆盖！
     return {"sources": sources}
 
 async def local_specialist_node(state: AgentState):
