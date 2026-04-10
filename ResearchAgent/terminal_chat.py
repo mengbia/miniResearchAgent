@@ -131,22 +131,6 @@ async def main():
                             if isinstance(chunk, str):
                                 print(chunk, end="", flush=True)
                                 final_answer += chunk
-
-                # 🌟 传入 config
-                async for event in deep_research_graph.astream_events(state, config=run_config, version="v2"):
-                    trace_agent_event(event)
-                    kind = event["event"]
-                    node_name = event.get("metadata", {}).get("langgraph_node", "")
-                    
-                    if kind == "on_chain_end" and node_name == "planner":
-                        print("\n   [📋 计划已生成，开始执行]...", end="\n   ")
-                    elif kind == "on_chain_start" and node_name == "worker":
-                        print("\n   [🌐 正在全网与知识库混合检索]...", end="\n   ")
-                    elif kind == "on_chat_model_stream" and node_name == "writer":
-                        chunk = event["data"]["chunk"].content
-                        if isinstance(chunk, str):
-                            print(chunk, end="", flush=True)
-                            final_answer += chunk
                             
         except Exception as e:
             print(f"\n❌ 终端执行报错: {str(e)}")
