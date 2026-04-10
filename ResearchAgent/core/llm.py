@@ -1,8 +1,8 @@
 import os
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from core.config import (LLM_API_KEY, LLM_API_BASE, LLM_MODEL_NAME,
-                    BACKUP_API_KEY, BACKUP_API_BASE, BACKUP_MODEL_NAME)
+from core.config import (LLM_API_KEY, LLM_API_BASE, LLM_MODEL_NAME, LLM_MODEL_EMBEDDING,
+                    BACKUP_API_KEY, BACKUP_API_BASE, BACKUP_MODEL_NAME, BACKUP_MODEL_EMBEDDING)
 
 from langchain_core.embeddings import Embeddings
 # 加载环境变量
@@ -68,7 +68,7 @@ class FallbackEmbeddings(Embeddings):
         self.main_emb = OpenAIEmbeddings(
             api_key=LLM_API_KEY,
             base_url=LLM_API_BASE,
-            model=BACKUP_MODEL_NAME
+            model=LLM_MODEL_EMBEDDING
         )
         
         # 2. 检查并实例化备用节点词向量
@@ -81,7 +81,7 @@ class FallbackEmbeddings(Embeddings):
                 api_key=backup_api_key,
                 base_url=backup_api_base,
                 # ⚠️ 注意：这里必须保证主备使用的是同款模型，否则向量维度不匹配会导致 ChromaDB 崩溃！
-                model=BACKUP_MODEL_NAME
+                model=BACKUP_MODEL_EMBEDDING
             )
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
