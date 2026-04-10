@@ -13,10 +13,17 @@ class UserMemoryStore:
     def __init__(self):
         # 初始化 Embedding 模型 (vector_store.py 里的一样)
         self.embeddings = get_embeddings()
+        
+        try:
+            model_name = getattr(self.embeddings, 'model', 'default_emb').replace("-", "_")
+        except:
+            model_name = "backup_emb"
 
-        # 创建一个专属的 Collection: "long_term_memory"
+        # 长期记忆也实行隔离
+        dynamic_collection_name = f"long_term_memory_{model_name}"
+
         self.vector_store = Chroma(
-            collection_name="long_term_memory",
+            collection_name=dynamic_collection_name,
             embedding_function=self.embeddings,
             persist_directory=MEMORY_PERSIST_DIR
         )

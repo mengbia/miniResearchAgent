@@ -23,9 +23,17 @@ class LocalVectorStore:
         # 1. 使用我们自定义的高可用容灾词向量
         self.embeddings = get_embeddings()
         
-        # 2. 连接或创建 ChromaDB 向量数据库
+        # 2. 动态获取当前正在使用的模型名字（把横杠替换为下划线，防止 Chroma 命名报错）
+        try:
+            model_name = getattr(self.embeddings, 'model', 'default_emb').replace("-", "_")
+        except:
+            model_name = "backup_emb"
+
+        # 动态拼接集合名称！这样主模型和备用模型的数据会自动分发到不同的表里
+        dynamic_collection_name = f"deep_research_kb_{model_name}"
+        
         self.vector_store = Chroma(
-            collection_name="deep_research_kb",
+            collection_name=dynamic_collection_name, 
             embedding_function=self.embeddings,
             persist_directory=CHROMA_PERSIST_DIR
         )
