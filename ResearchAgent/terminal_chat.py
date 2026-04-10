@@ -104,33 +104,73 @@ async def main():
                             final_answer += chunk
 
             elif mode == "deep":
-                # 深度模式目前还是单次提问执行 (也可以根据需要把 chat_history 传进去供 Planner 参考)
-                state = {"user_query": user_input, "messages": chat_history, "plan": [], "sources": [], "report": "", "loop_count": 0}
-
-                # 🌟为当前对话生成或指定一个 thread_id
-                # 在终端调试中，我们可以用固定的 ID，这样如果你强行 Ctrl+C 中断，下次运行还会接着刚才的进度！
-                run_config = {"configurable": {"thread_id": "terminal_debug_thread_01"}}
+                # 设定固定的任务 ID，用于容灾和断点续传
+                thread_id = "human_in_loop_test_01"
+                run_config = {"configurable": {"thread_id": thread_id}}
                 
-                # 🌟 使用异步上下文管理器，安全挂载 SQLite
                 async with AsyncSqliteSaver.from_conn_string(DB_PATH) as memory_saver:
-                    # 💡 动态编译带记忆硬盘的图谱
-                    persistent_graph = workflow.compile(checkpointer=memory_saver)
+                    # 🌟 在图谱编译时，强制要求在 "planner" 节点执行完毕后【挂起】
+                    persistent_graph = workflow.compile(
+                        checkpointer=memory_saver,
+                        interrupt_after=["planner"]
+                    )
                     
-                    # 使用 persistent_graph 代替之前的 deep_research_graph
-                    async for event in persistent_graph.astream_events(state, config=run_config, version="v2"):
+                    # 获取当前数据库中该任务的状态
+                    current_state = await persistent_graph.aget_state(run_config)
+                    
+                    # 判定启动方式：如果当前任务没有被挂起（全新任务），则传入完整初始状态
+                    if not current_state.next:
+                        input_data = {"user_query": user_input, "messages": chat_history, "plan": [], "sources": [], "report": "", "loop_count": 0}
+                    else:
+                        # 兜底：如果一上来发现任务就在挂起状态，说明是上次强退的，直接恢复
+                        input_data = None
+                        print("\n[系统提示] 侦测到未完成的中断任务，正在恢复...")
+
+                    # 🏃 第一段奔跑：运行到 Planner 节点，图谱会自动触发 interrupt_after 并暂停
+                    async for event in persistent_graph.astream_events(input_data, config=run_config, version="v2"):
                         trace_agent_event(event)
                         kind = event["event"]
                         node_name = event.get("metadata", {}).get("langgraph_node", "")
                         
                         if kind == "on_chain_end" and node_name == "planner":
-                            print("\n   [📋 计划已生成，开始执行]...", end="\n   ")
-                        elif kind == "on_chain_start" and node_name == "worker":
-                            print("\n   [🌐 正在全网与知识库混合检索]...", end="\n   ")
-                        elif kind == "on_chat_model_stream" and node_name == "writer":
-                            chunk = event["data"]["chunk"].content
-                            if isinstance(chunk, str):
-                                print(chunk, end="", flush=True)
-                                final_answer += chunk
+                            print("\n   [📋 计划已生成，等待人类审核]...", end="\n   ")
+                            
+                    # ==========================================
+                    # 🌟 捕获断点，请求人类介入 (Human-in-the-loop)
+                    # ==========================================
+                    # 再次获取状态，此时 .next 列表会有值，说明任务被成功拦截了
+                    paused_state = await persistent_graph.aget_state(run_config)
+                    
+                    if paused_state.next:
+                        print("\n\n" + "="*60)
+                        print(" ✋ [大纲审批] 任务已强制暂停！规划师已提交以下检索方案：")
+                        plans = paused_state.values.get("plan", [])
+                        for i, p in enumerate(plans):
+                            print(f"   {i+1}. {p.get('title')}")
+                        print("="*60)
+                        
+                        # 在终端阻塞，等待你的确认
+                        approval = input("\n👉 审批意见 (直接按【回车键】批准执行，或输入 'quit' 放弃): ")
+                        
+                        if approval.lower() in ['quit', 'exit', 'q']:
+                            print("\n🛑 任务已取消。")
+                            continue # 跳出本次循环
+                            
+                        print("\n▶️ 收到最高指令：批准执行！正在唤醒特种部队...")
+                        
+                        # 🏃 第二段奔跑：传入 None，LangGraph 会自动从刚才 SQLite 记录的断点处苏醒！
+                        async for event in persistent_graph.astream_events(None, config=run_config, version="v2"):
+                            trace_agent_event(event)
+                            kind = event["event"]
+                            node_name = event.get("metadata", {}).get("langgraph_node", "")
+                            
+                            if kind == "on_chain_start" and node_name in ["web_specialist", "arxiv_specialist", "data_specialist", "local_specialist"]:
+                                print(f"\n   [🌐 {node_name} 正在火速出动检索]...", end="\n   ")
+                            elif kind == "on_chat_model_stream" and node_name == "writer":
+                                chunk = event["data"]["chunk"].content
+                                if isinstance(chunk, str):
+                                    print(chunk, end="", flush=True)
+                                    final_answer += chunk
                             
         except Exception as e:
             print(f"\n❌ 终端执行报错: {str(e)}")

@@ -183,7 +183,6 @@ async def filter_node(state: AgentState):
     
     print(f"[Filter] ✨ 清洗完毕，保留 {len(filtered_sources)} 条有效数据。")
     
-    # 🌟 核心破局点：使用特殊的字典格式，触发 Reducer 的【强制覆盖模式】
     # 这样就能彻底斩断 operator.add 造成的无限膨胀死循环！
     return {"sources": {"action": "overwrite", "data": filtered_sources}}
 

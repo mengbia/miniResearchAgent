@@ -139,47 +139,74 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
             # 分支 1：深度研究模式 (跑复杂的 LangGraph 图)
             # ==========================================
             if mode == "deep":
-                state = {"user_query": user_query, "messages": [], "plan": [], "sources": [], "report": ""}
-                
-                # 🌟 获取任务 ID
-                task_id = request.messages[-1].id if request.messages[-1].id else str(uuid.uuid4())
+                # 🌟 核心：为了让两次分开的 HTTP 请求能接上头，必须使用固定的 thread_id。
+                # 在真实生产中，这里应该用前端传来的对话框 ID (conversation_id)。
+                # 为了你目前方便测试，我们取第一条消息的 ID，或者给个默认值。
+                task_id = request.messages[0].id if (request.messages and request.messages[0].id) else "web_deep_task_01"
                 run_config = {"configurable": {"thread_id": task_id}}
 
                 async with AsyncSqliteSaver.from_conn_string(DB_PATH) as memory_saver:
-                    persistent_graph = workflow.compile(checkpointer=memory_saver)
+                    # 🌟 在图谱编译时，打上 Planner 断点
+                    persistent_graph = workflow.compile(
+                        checkpointer=memory_saver,
+                        interrupt_after=["planner"]
+                    )
                     
-                    async for event in persistent_graph.astream_events(state, config=run_config, version="v2"):
-                        trace_agent_event(event)
-
-                        kind = event["event"]
-                        # langgraph_node 表示当前在哪个大节点里运行
-                        node_name = event.get("metadata", {}).get("langgraph_node", "")
-                        # name 表示当前具体是哪个组件（比如节点本身、或者内部的某个大模型）触发了事件
-                        current_name = event.get("name", "") 
+                    # 获取当前状态，看看这个任务是不是被挂起在一半了
+                    current_state = await persistent_graph.aget_state(run_config)
+                    
+                    if not current_state.next:
+                        # ==========================================
+                        # 🏃 第一阶段：全新任务，跑到大纲生成后挂起
+                        # ==========================================
+                        input_data = {"user_query": user_query, "messages": [], "plan": [], "sources": [], "report": "", "loop_count": 0}
                         
-                    
-                        if kind == "on_chain_end" and current_name == "planner":
-                            output = event["data"].get("output", {})
-                            # 加入类型保护，防止 AIMessage 引发崩溃
-                            if isinstance(output, dict) and "plan" in output:
-                                yield f"data: {json.dumps({'type': 'plan_created', 'content': output['plan']}, ensure_ascii=False)}\n\n"
-                                
-                
-                        elif kind == "on_chain_start" and current_name in ["web_specialist", "local_specialist"]:
-                            tool_name = "全网深度检索" if current_name == "web_specialist" else "本地内部库检索"
-                            yield f"data: {json.dumps({'type': 'tool_start', 'content': {'input': f'特工出动：正在执行{tool_name}...'}}, ensure_ascii=False)}\n\n"
+                        async for event in persistent_graph.astream_events(input_data, config=run_config, version="v2"):
+                            trace_agent_event(event)
+                            kind = event["event"]
+                            node_name = event.get("metadata", {}).get("langgraph_node", "")
                             
-                        elif kind == "on_chain_end" and current_name in ["web_specialist", "local_specialist"]:
-                            yield f"data: {json.dumps({'type': 'tool_end'})}\n\n"
-                            output = event["data"].get("output", {})
-                            if isinstance(output, dict) and "sources" in output:
-                                yield f"data: {json.dumps({'type': 'sources', 'content': output['sources']}, ensure_ascii=False)}\n\n"
+                            if kind == "on_chain_end" and node_name == "planner":
+                                plan_data = event["data"]["output"].get("plan", [])
+                                yield f"data: {json.dumps({'type': 'plan_created', 'content': plan_data}, ensure_ascii=False)}\n\n"
                                 
-                        # 🌟 Writer 节点依然通过 node_name 捕获其内部大模型实时打字的流式数据
-                        elif kind == "on_chat_model_stream" and node_name == "writer":
-                            chunk = event["data"]["chunk"].content
-                            if chunk:
-                                yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
+                        # 检查是否成功挂起，如果挂起了，给前端发一段提示文字
+                        paused_state = await persistent_graph.aget_state(run_config)
+                        if paused_state.next:
+                            yield f"data: {json.dumps({'type': 'text', 'content': '\n\n---\n**✋ [大纲审批]** 任务已挂起！请查看上方的检索方案。\n- 若同意：请直接回复“继续”或“同意”。\n- 若放弃：请回复“取消”。'}, ensure_ascii=False)}\n\n"
+                            
+                    else:
+                        # ==========================================
+                        # 🏃 第二阶段：任务苏醒！用户的提问就是“审批指令”
+                        # ==========================================
+                        if user_query.strip().lower() in ['quit', '取消', '放弃', 'q']:
+                            yield f"data: {json.dumps({'type': 'text', 'content': '🛑 任务已取消。您可以开启新的深度研究。'}, ensure_ascii=False)}\n\n"
+                            return
+                            
+                        yield f"data: {json.dumps({'type': 'text', 'content': '▶️ **收到审批指令！** 正在唤醒特种部队继续执行...\n\n'}, ensure_ascii=False)}\n\n"
+                        
+                        # (🔥 终极玩法预留：你甚至可以用 persistent_graph.aupdate_state 把前端用户修改后的大纲强行塞进状态里，替代原来的大纲)
+                        
+                        # 传入 None 恢复执行
+                        async for event in persistent_graph.astream_events(None, config=run_config, version="v2"):
+                            trace_agent_event(event)
+                            kind = event["event"]
+                            node_name = event.get("metadata", {}).get("langgraph_node", "")
+                            
+                            if kind == "on_chain_start" and node_name in ["web_specialist", "arxiv_specialist", "data_specialist", "local_specialist"]:
+                                yield f"data: {json.dumps({'type': 'tool_start', 'content': {'input': f'特工 {node_name} 正在全网检索...'}}, ensure_ascii=False)}\n\n"
+                                
+                            elif kind == "on_chain_end" and node_name in ["web_specialist", "arxiv_specialist", "data_specialist", "local_specialist"]:
+                                yield f"data: {json.dumps({'type': 'tool_end'})}\n\n"
+                                sources_data = event["data"]["output"].get("sources", [])
+                                # 防止空数据导致前端报错
+                                if sources_data:
+                                    yield f"data: {json.dumps({'type': 'sources', 'content': sources_data}, ensure_ascii=False)}\n\n"
+                                
+                            elif kind == "on_chat_model_stream" and node_name == "writer":
+                                chunk = event["data"]["chunk"].content
+                                if chunk:
+                                    yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
                             
             # ==========================================
             # 分支 2：普通闲聊模式 (企业级 Agentic RAG 版)
