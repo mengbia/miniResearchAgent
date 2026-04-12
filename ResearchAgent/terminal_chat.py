@@ -118,30 +118,52 @@ async def main():
                     # 获取当前数据库中该任务的状态
                     current_state = await persistent_graph.aget_state(run_config)
                     
-                    # 判定启动方式：如果当前任务没有被挂起（全新任务），则传入完整初始状态
+                    # 判定启动方式：准备第一次抛给图谱的载荷 (payload)
                     if not current_state.next:
-                        input_data = {"user_query": user_input, "messages": chat_history, "plan": [], "sources": [], "report": "", "loop_count": 0}
+                        payload = {"user_query": user_input, "messages": chat_history, "plan": [], "sources": [], "report": "", "loop_count": 0}
                     else:
-                        # 兜底：如果一上来发现任务就在挂起状态，说明是上次强退的，直接恢复
-                        input_data = None
+                        payload = None
                         print("\n[系统提示] 侦测到未完成的中断任务，正在恢复...")
 
-                    # 🏃 第一段奔跑：运行到 Planner 节点，图谱会自动触发 interrupt_after 并暂停
-                    async for event in persistent_graph.astream_events(input_data, config=run_config, version="v2"):
-                        trace_agent_event(event)
-                        kind = event["event"]
-                        node_name = event.get("metadata", {}).get("langgraph_node", "")
-                        
-                        if kind == "on_chain_end" and node_name == "planner":
-                            print("\n   [📋 计划已生成，等待人类审核]...", end="\n   ")
+                    # ==========================================
+                    # 🌟 进阶优化：引入内层状态机监听循环
+                    # ==========================================
+                    while True:
+                        # 🏃 执行图谱（不论是初次启动 payload，还是中断恢复 None，都在这里跑）
+                        async for event in persistent_graph.astream_events(payload, config=run_config, version="v2"):
+                            trace_agent_event(event)
+                            kind = event["event"]
+                            node_name = event.get("metadata", {}).get("langgraph_node", "")
                             
-                    # ==========================================
-                    # 🌟 捕获断点，请求人类介入 (Human-in-the-loop)
-                    # ==========================================
-                    # 再次获取状态，此时 .next 列表会有值，说明任务被成功拦截了
-                    paused_state = await persistent_graph.aget_state(run_config)
-                    
-                    if paused_state.next:
+                            if kind == "on_chain_end" and node_name == "planner":
+                                print("\n   [📋 计划已生成，等待处理]...", end="\n   ")
+                            elif kind == "on_chain_start" and node_name in ["web_specialist", "arxiv_specialist", "data_specialist", "local_specialist"]:
+                                print(f"\n   [🌐 {node_name} 正在火速出动检索]...", end="\n   ")
+                            elif kind == "on_chat_model_stream" and node_name == "writer":
+                                chunk = event["data"]["chunk"].content
+                                if isinstance(chunk, str):
+                                    print(chunk, end="", flush=True)
+                                    final_answer += chunk
+
+                        # 当 async for 结束时，说明图谱要么彻底跑完了，要么撞到了 interrupt_after 断点
+                        # 再次获取最新状态
+                        paused_state = await persistent_graph.aget_state(run_config)
+                        
+                        # 1. 彻底结束判定
+                        if not paused_state.next:
+                            # 如果 next 为空，说明整个研究大一统跑完了（走到了 END）
+                            break 
+                            
+                        # 2. 触发了断点拦截
+                        loop_count = paused_state.values.get("loop_count", 0)
+                        
+                        # 🌟 进阶自动化：如果这不是第一轮，说明是审查员打回的，直接静默放行
+                        if loop_count > 0:
+                            print(f"\n🔄 审查员第 {loop_count} 次打回重做，系统已自动放行新计划！")
+                            payload = None  # 告诉图谱下一轮是 resume
+                            continue        # 💡 直接进入下一轮 while，连着跑！
+                            
+                        # 🌟 初次运行，乖乖请求人类大纲审批
                         print("\n\n" + "="*60)
                         print(" ✋ [大纲审批] 任务已强制暂停！规划师已提交以下检索方案：")
                         plans = paused_state.values.get("plan", [])
@@ -149,28 +171,14 @@ async def main():
                             print(f"   {i+1}. {p.get('title')}")
                         print("="*60)
                         
-                        # 在终端阻塞，等待你的确认
                         approval = input("\n👉 审批意见 (直接按【回车键】批准执行，或输入 'quit' 放弃): ")
                         
                         if approval.lower() in ['quit', 'exit', 'q']:
-                            print("\n🛑 任务已取消。")
-                            continue # 跳出本次循环
+                            print("\n🛑 任务已手动取消。")
+                            break # 彻底跳出内部循环
                             
                         print("\n▶️ 收到最高指令：批准执行！正在唤醒特种部队...")
-                        
-                        # 🏃 第二段奔跑：传入 None，LangGraph 会自动从刚才 SQLite 记录的断点处苏醒！
-                        async for event in persistent_graph.astream_events(None, config=run_config, version="v2"):
-                            trace_agent_event(event)
-                            kind = event["event"]
-                            node_name = event.get("metadata", {}).get("langgraph_node", "")
-                            
-                            if kind == "on_chain_start" and node_name in ["web_specialist", "arxiv_specialist", "data_specialist", "local_specialist"]:
-                                print(f"\n   [🌐 {node_name} 正在火速出动检索]...", end="\n   ")
-                            elif kind == "on_chat_model_stream" and node_name == "writer":
-                                chunk = event["data"]["chunk"].content
-                                if isinstance(chunk, str):
-                                    print(chunk, end="", flush=True)
-                                    final_answer += chunk
+                        payload = None # 告诉图谱下一轮是 resume，进入下一轮 while 循环顶部
                             
         except Exception as e:
             print(f"\n❌ 终端执行报错: {str(e)}")
