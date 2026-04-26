@@ -6,12 +6,11 @@ from langchain_core.messages import SystemMessage
 from core.llm import get_llm, get_embeddings
 from core.prompt_manager import prompt_manager
 
-# 🌟 为记忆库分配一个独立的持久化目录或 Collection
+# Persistent directory for user memory
 MEMORY_PERSIST_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "chroma_data", "user_memory")
 
 class UserMemoryStore:
     def __init__(self):
-        # 初始化 Embedding 模型 (vector_store.py 里的一样)
         self.embeddings = get_embeddings()
         
         try:
@@ -19,7 +18,7 @@ class UserMemoryStore:
         except:
             model_name = "backup_emb"
 
-        # 长期记忆也实行隔离
+        # Isolate long-term memory collections based on embedding model
         dynamic_collection_name = f"long_term_memory_{model_name}"
 
         self.vector_store = Chroma(
@@ -30,44 +29,43 @@ class UserMemoryStore:
         self.llm = get_llm()
 
     async def async_extract_and_save(self, user_input: str):
-        """异步执行：分析用户输入，如果是重要偏好，则存入 Chroma"""
+        """Analyzes user input for important preferences and saves them to the vector store."""
         template = prompt_manager.get("memory", "extractor")
         prompt = template.format(user_input=user_input)
         
         try:
-            # 🌟 1. 尝试大模型提取 (如果主模型欠费，这里会自动触发 fallback_llm)
+            # Extract memory fact using LLM with fallback support
             response = await self.llm.ainvoke([SystemMessage(content=prompt)])
             memory_fact = response.content.strip()
             
             if memory_fact and memory_fact.lower() != "none":
-                print(f"🧠 [长期记忆捕获]: {memory_fact}")
+                print(f"[Memory Captured]: {memory_fact}")
                 doc_id = str(uuid.uuid4())
                 
                 try:
-                    # 🌟 2. 尝试向量入库 (单独隔离：防止阿里云 Embedding 模型也欠费导致程序崩溃)
+                    # Save to vector store
                     self.vector_store.add_texts(
                         texts=[memory_fact], 
                         ids=[doc_id],
                         metadatas=[{"source": "user_chat"}]
                     )
                 except Exception as emb_e:
-                    print(f"⚠️ [警告] 记忆已提取，但向量入库失败 (通常是因为 Embedding 模型也欠费了): {emb_e}")
+                    print(f"[Warning] Memory extracted but vector storage failed: {emb_e}")
                     
         except Exception as e:
-            print(f"❌ 记忆提取大模型彻底崩溃 (主备模型均失败): {e}")
+            print(f"[Error] Memory extraction failed: {e}")
 
     def retrieve_memory(self, query: str, top_k: int = 3) -> str:
-        """提问前执行：根据当前问题，去向量库捞取相关的长期记忆"""
+        """Retrieves relevant long-term memories based on the current query."""
         try:
             results = self.vector_store.similarity_search(query, k=top_k)
             if not results:
-                return "暂无相关历史记忆。"
+                return "No relevant historical memory found."
             
             memories = [doc.page_content for doc in results]
             return "\n".join([f"- {m}" for m in memories])
         except Exception as e:
-            print(f"❌ 记忆检索失败: {e}")
-            return "记忆检索异常。"
+            print(f"[Error] Memory retrieval failed: {e}")
+            return "Memory retrieval error."
 
-# 全局单例
 user_memory = UserMemoryStore()
