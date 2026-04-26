@@ -7,7 +7,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver # 🌟 导入异步
 from agents.deep_graph import deep_research_graph, workflow, DB_PATH # 🌟 导入 workflow 和 DB_PATH
 from langgraph.prebuilt import create_react_agent
 from core.llm import get_llm
-from agents.chat_agent import tools  # 🌟 导入工具箱
+from agents.chat_agent import tools, normal_chat_agent  # 🌟 导入工具箱和路由agent
 
 # 引入基建模块（日志、提示词、记忆库）
 from core.logger import logger, trace_agent_event, log_user_interaction, log_filepath
@@ -75,33 +75,24 @@ async def main():
         try:
             if mode == "normal":
                 # ==========================================
-                # 🌟 3. 动态注入长期记忆并构建 Agent
+                # 🌟 3. 基于 Router 分级路由网关进行闲聊
                 # ==========================================
-                relevant_memories = user_memory.retrieve_memory(user_input)
-                base_system_prompt = prompt_manager.get("chat_agent", "system_prompt")
+                state = {
+                    "messages": chat_history, 
+                    "current_route": "", 
+                    "search_keywords": []
+                }
                 
-                # 确保 JSON 中的 prompts 里有 {long_term_memory} 占位符
-                injected_prompt = base_system_prompt.format(long_term_memory=relevant_memories)
-
-                # 实时组装拥有最新记忆的聊天智能体
-                memory_aware_agent = create_react_agent(
-                    get_llm(),
-                    tools=tools,
-                    prompt=injected_prompt
-                )
-
-                state = {"messages": chat_history}
-                
-                async for event in memory_aware_agent.astream_events(state, version="v2"):
+                async for event in normal_chat_agent.astream_events(state, version="v2"):
                     trace_agent_event(event)
                     kind = event["event"]
                     if kind == "on_tool_start":
                         print(f"\n   [🛠️ 正在调用工具: {event['name']}]...", end="\n   ")
                     elif kind == "on_chat_model_stream":
-                        chunk = event["data"]["chunk"].content
-                        if isinstance(chunk, str):
-                            print(chunk, end="", flush=True)
-                            final_answer += chunk
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk and hasattr(chunk, "content") and isinstance(chunk.content, str):
+                            print(chunk.content, end="", flush=True)
+                            final_answer += chunk.content
 
             elif mode == "deep":
                 # 设定固定的任务 ID，用于容灾和断点续传

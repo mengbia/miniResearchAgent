@@ -6,3 +6,4 @@ evaluation_result/
 chroma_data/
 logs/
 checkpoints/
+pyproject.toml

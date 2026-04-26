@@ -7,6 +7,7 @@ from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
+from openai import RateLimitError, APIConnectionError, APITimeoutError
 from core.llm import get_llm
 from agents.tools import get_web_search_tool, arxiv_search_tool, read_excel_csv_tool
 from agents.state import AgentState

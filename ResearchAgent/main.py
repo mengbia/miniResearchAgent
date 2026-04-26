@@ -209,32 +209,17 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                             break           # 跳出循环，结束当前 HTTP 请求
                             
             # ==========================================
-            # 分支 2：普通闲聊模式 (企业级 Agentic RAG 版)
+            # 分支 2：普通闲聊模式 (基于 Router 分级路由架构)
             # ==========================================
             else:
-                # ==========================================
-                # 🌟 长期记忆 (LTM)：动态检索与注入
-                # ==========================================
-                # 提问前，先从 Chroma 捞出跟当前问题相关的长期偏好
-                relevant_memories = user_memory.retrieve_memory(user_query)
-                print(f"🔮 [提取到的相关长期记忆]:\n{relevant_memories}")
-                
-                # 读取基础 prompt 模板
-                base_system_prompt = prompt_manager.get("chat_agent", "system_prompt")
-                # 将捞出来的记忆动态注入进去
-                injected_prompt = base_system_prompt.format(long_term_memory=relevant_memories)
-
-                # 重新初始化带有最新记忆的 Agent (注意：这在生产中最好缓存，但目前每次重新实例化也没问题)
-                memory_aware_agent = create_react_agent(
-                    get_llm(),
-                    tools=tools, 
-                    prompt=injected_prompt
-                )
-
-                state = {"messages": history} # 这里的 history 已经是滑动窗口截断过的了
+                state = {
+                    "messages": history, 
+                    "current_route": "", 
+                    "search_keywords": []
+                }
                 
                 # 3. 🌟 启动监听器，实时把 Agent 思考和调用工具的过程发给前端
-                async for event in memory_aware_agent.astream_events(state, version="v2"):
+                async for event in normal_chat_agent.astream_events(state, version="v2"):
                    
                     # 🌟 无侵入式解耦追踪！
                     trace_agent_event(event)

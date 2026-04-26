@@ -68,7 +68,8 @@ class FallbackEmbeddings(Embeddings):
         self.main_emb = OpenAIEmbeddings(
             api_key=LLM_API_KEY,
             base_url=LLM_API_BASE,
-            model=LLM_MODEL_EMBEDDING
+            model=LLM_MODEL_EMBEDDING,
+            check_embedding_ctx_length=False
         )
         
         # 2. 检查并实例化备用节点词向量
@@ -81,7 +82,8 @@ class FallbackEmbeddings(Embeddings):
                 api_key=backup_api_key,
                 base_url=backup_api_base,
                 # ⚠️ 注意：这里必须保证主备使用的是同款模型，否则向量维度不匹配会导致 ChromaDB 崩溃！
-                model=BACKUP_MODEL_EMBEDDING
+                model=BACKUP_MODEL_EMBEDDING,
+                check_embedding_ctx_length=False
             )
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
