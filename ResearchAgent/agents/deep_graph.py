@@ -5,7 +5,7 @@ import json
 import asyncio
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from core.llm import get_llm
 from agents.tools import get_web_search_tool, arxiv_search_tool, read_excel_csv_tool
@@ -17,7 +17,12 @@ from core.prompt_manager import prompt_manager
 llm = get_llm()
 search_tool = get_web_search_tool(max_results=3)
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((RateLimitError, APIConnectionError, APITimeoutError)),
+    reraise=True,
+)
 async def safe_web_search(keyword: str):
     return await search_tool.ainvoke({"query": keyword})
 
