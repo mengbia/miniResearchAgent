@@ -41,7 +41,7 @@ if not os.path.exists(UPLOAD_DIR):
  
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  
+    allow_origins=["*"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -128,7 +128,11 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                             yield f"data: {json.dumps({'type': 'text', 'content': 'Task cancelled.'}, ensure_ascii=False)}\n\n"
                             return
                             
-                        yield f"data: {json.dumps({'type': 'text', 'content': 'Resuming execution of specialist agents.\n\n'}, ensure_ascii=False)}\n\n"
+                        # 1. 先把字典和 JSON 序列化的部分在外部处理好
+                        json_str = json.dumps({'type': 'text', 'content': 'Resuming execution of specialist agents.\n\n'}, ensure_ascii=False)
+
+                        # 2. 然后再把生成的纯字符串塞进 f-string 里
+                        yield f"data: {json_str}\n\n"
 
                     while True:
                         async for event in persistent_graph.astream_events(payload, config=run_config, version="v2"):
@@ -163,12 +167,16 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                         
                         if loop_count > 0:
                             # Automatic continuation after reviewer round
-                            yield f"data: {json.dumps({'type': 'text', 'content': f'\n\n> System Notification: Reviewer round {loop_count} requested revisions. Optimizing and continuing...\n\n'}, ensure_ascii=False)}\n\n"
+                            notification_text = f'\n\n> System Notification: Reviewer round {loop_count} requested revisions. Optimizing and continuing...\n\n'
+                            # 生成 JSON 字符串
+                            json_str = json.dumps({'type': 'text', 'content': notification_text}, ensure_ascii=False)
+                            # 最后通过 yield 输出，用纯粹的变量替换
+                            yield f"data: {json_str}\n\n"
                             payload = None
                             continue
                         else:
                             # Wait for user approval of the initial plan
-                            yield f"data: {json.dumps({'type': 'text', 'content': '\n\n---\n**Outline Approval Required**\nTask suspended. Please review the proposed research plan.\n- Reply \"continue\" or \"agree\" to proceed.\n- Reply \"cancel\" to terminate.'}, ensure_ascii=False)}\n\n"
+                            yield "data: " + json.dumps({'type': 'text', 'content': '\n\n---\n**Outline Approval Required**\nTask suspended. Please review the proposed research plan.\n- Reply "continue" or "agree" to proceed.\n- Reply "cancel" to terminate.'}, ensure_ascii=False) + "\n\n"
                             break
                             
             else:
@@ -190,9 +198,15 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                         yield f"data: {json.dumps({'type': 'tool_end'})}\n\n"
                         
                     elif kind == "on_chat_model_stream":
+                        node_name = event.get("metadata", {}).get("langgraph_node", "")
                         chunk = event["data"]["chunk"].content
                         if chunk and isinstance(chunk, str):
-                            yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
+                            if node_name == "router":
+                                # Stream routing reasoning to a dedicated thinking channel
+                                yield f"data: {json.dumps({'type': 'thinking', 'content': chunk}, ensure_ascii=False)}\n\n"
+                            else:
+                                # Standard response stream
+                                yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
             print(f"Error: {e}")

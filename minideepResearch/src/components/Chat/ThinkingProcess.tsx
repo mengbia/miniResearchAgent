@@ -1,7 +1,7 @@
 "use client"; // 👈 必须加在第一行
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, CheckCircle2, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, CheckCircle2, Search, BrainCircuit } from "lucide-react";
 import { Step } from "@/store/useChatStore";
 
 export default function ThinkingProcess({ steps }: { steps: Step[] }) {
@@ -25,7 +25,7 @@ export default function ThinkingProcess({ steps }: { steps: Step[] }) {
           ) : (
              <CheckCircle2 className="w-4 h-4 text-green-500" />
           )}
-          <span>搜索内容 ({steps.length} 个)</span>
+          <span>思考过程 ({steps.length} 步)</span>
         </div>
         {isExpanded ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
       </div>
@@ -40,7 +40,11 @@ export default function ThinkingProcess({ steps }: { steps: Step[] }) {
                 {step.status === "pending" ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
                 ) : (
-                  <Search className="w-3.5 h-3.5 text-gray-400" />
+                  step.type === "reasoning" ? (
+                    <BrainCircuit className="w-3.5 h-3.5 text-purple-400" />
+                  ) : (
+                    <Search className="w-3.5 h-3.5 text-gray-400" />
+                  )
                 )}
               </div>
               {/* 内容 */}

@@ -115,7 +115,9 @@ export default function ChatMessage({ message, onRegenerate, isReadOnly = false 
             {message.content && (
                 <div
                   onClick={handleContentClick}
-                  className={`prose prose-sm dark:prose-invert break-words max-w-none ${
+                  className={`prose prose-sm break-words max-w-none ${
+                      isUser ? "prose-invert text-white" : "dark:prose-invert text-gray-800 dark:text-gray-100"
+                  } ${
                       // 如果上面有思考过程或任务，正文上方加分割线
                       (!isUser && (message.steps?.length || message.plan?.length)) ? "mt-4 pt-4 border-t dark:border-gray-800" : ""
                   }`}

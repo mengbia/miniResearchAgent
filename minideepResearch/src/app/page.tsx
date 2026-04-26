@@ -116,8 +116,10 @@ export default function Home() {
     const controller = new AbortController();
     setAbortController(controller);
 
-    // ✨ 核心修复：把变量声明移到 try 块的外面！
+    // Variables for streaming accumulation
     let accumulatedContent = "";
+    let currentThinkingId: string | null = null;
+    let accumulatedThinking = "";
 
     try {
       const currentMessages = useChatStore.getState().messages.filter(m => m.content !== "");
@@ -139,9 +141,6 @@ export default function Home() {
 
       let buffer = "";
 
-      // 🌟🌟🌟 核心修复：流式累加变量 (必须在循环外) 🌟🌟🌟
-      let accumulatedContent = "";
-
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -157,15 +156,48 @@ export default function Home() {
               if (!jsonStr.trim()) continue;
               const data = JSON.parse(jsonStr);
 
-              // === 1. 文本生成 (核心修复逻辑) ===
+              // === 1. Text Generation ===
               if (data.type === "text") {
-                // 累加内容，而不是直接赋值，防止碎片覆盖
+                if (currentThinkingId) {
+                  completeLastStep();
+                  currentThinkingId = null;
+                  accumulatedThinking = "";
+                }
                 accumulatedContent += data.content;
                 updateLastMessage(accumulatedContent);
               }
 
-              // === 2. 工具开始 (递归解析修复版) ===
+              // === 2. Thinking Process (New) ===
+              else if (data.type === "thinking") {
+                if (!currentThinkingId) {
+                  currentThinkingId = nanoid();
+                  addStepToLastMessage({
+                    id: currentThinkingId,
+                    type: "reasoning",
+                    content: "正在分析意图...",
+                    status: "pending"
+                  });
+                }
+                accumulatedThinking += data.content;
+                // Update the step content with the thinking stream
+                const msgs = useChatStore.getState().messages;
+                const lastMsg = msgs[msgs.length - 1];
+                if (lastMsg.steps) {
+                  const step = lastMsg.steps.find(s => s.id === currentThinkingId);
+                  if (step) {
+                    step.content = accumulatedThinking;
+                  }
+                }
+              }
+
+              // === 3. Tool Start ===
               else if (data.type === "tool_start") {
+                // If we were thinking, complete it
+                if (currentThinkingId) {
+                  completeLastStep();
+                  currentThinkingId = null;
+                  accumulatedThinking = "";
+                }
                 const inputPayload = data.content.input;
 
                 // 🌟 定义递归解析函数 (解决 JSON 套娃问题)
