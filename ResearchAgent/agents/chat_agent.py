@@ -113,18 +113,28 @@ async def web_search_node(state: AgentState, config: RunnableConfig):
     return {"messages": new_messages}
 
 async def local_rag_node(state: AgentState, config: RunnableConfig):
-    """Handles queries requiring internal knowledge base retrieval."""
-    logger.info(f"[Local RAG] Executing local retrieval agent with keywords: {state.get('search_keywords')}")
+    """Handles queries requiring internal knowledge base retrieval using Agentic RAG."""
+    logger.info(f"[Local RAG] Executing Agentic RAG workflow with keywords: {state.get('search_keywords')}")
     
-    base_sys = prompt_manager.get("chat_agent", "system_prompt")
-    sys_prompt = base_sys.format(long_term_memory=state.get("context_memory", "")) + f"\n\n(Note: Recommended search keywords: {state.get('search_keywords')})"
+    from agents.agentic_rag import agentic_rag_graph
+    from langchain_core.messages import AIMessage
     
-    local_tools = [list_local_files, search_local_content, read_full_document, read_excel_csv_tool]
-    agent = create_react_agent(get_llm(), tools=local_tools, prompt=sys_prompt)
+    user_query = state["messages"][-1].content
+    chat_history = state["messages"][:-1]
+    search_keywords = state.get("search_keywords", [])
+    initial_query = search_keywords[0] if search_keywords else user_query
     
-    res = await agent.ainvoke({"messages": state["messages"]}, config=config)
-    new_messages = res["messages"][len(state["messages"]):]
-    return {"messages": new_messages}
+    rag_state = {
+        "original_query": user_query,
+        "chat_history": chat_history,
+        "current_search_query": initial_query,
+        "documents": [],
+        "iteration_count": 0,
+        "final_answer": ""
+    }
+    
+    res = await agentic_rag_graph.ainvoke(rag_state, config=config)
+    return {"messages": [AIMessage(content=res["final_answer"])]}
 
 # StateGraph construction
 workflow = StateGraph(AgentState)
