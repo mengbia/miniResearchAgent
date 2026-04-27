@@ -209,9 +209,8 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                                 yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
 
         except Exception as e:
-            print(f"Error: {e}")
-            logger.error(f"Web API runtime error: {str(e)}")
-            error_data = json.dumps({"type": "text", "content": f"\n\nBackend error: {str(e)}"}, ensure_ascii=False)
+            logger.exception(f"Web API runtime error: {str(e)}")
+            error_data = json.dumps({"type": "text", "content": f"\n\n❌ 抱歉，系统处理时发生内部错误。"}, ensure_ascii=False)
             yield f"data: {error_data}\n\n"
 
     return StreamingResponse(agent_stream(), media_type="text/event-stream")

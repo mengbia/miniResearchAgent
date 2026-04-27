@@ -24,7 +24,13 @@ async def grade_single_doc(doc: Document, query: str) -> bool:
     """Evaluate a single document for relevance using LLM structured output."""
     llm = get_llm()
     grader = llm.with_structured_output(GradeResult)
-    prompt = f"Assess if the following document is relevant to the user query.\n\nQuery: {query}\n\nDocument: {doc.page_content}"
+    prompt = f"""Assess if the following document is relevant to the user query.
+<query>
+{query}
+</query>
+<document>
+{doc.page_content}
+</document>"""
     try:
         res = await grader.ainvoke([HumanMessage(content=prompt)])
         return res.is_relevant

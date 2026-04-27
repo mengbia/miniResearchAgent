@@ -3,7 +3,7 @@ import uuid
 import datetime
 from langchain_chroma import Chroma
 from core.config import LLM_API_KEY
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 from core.llm import get_llm, get_embeddings
 from core.prompt_manager import prompt_manager
 
@@ -31,12 +31,15 @@ class UserMemoryStore:
 
     async def async_extract_and_save(self, user_input: str):
         """Analyzes user input for important preferences and saves them to the vector store."""
-        template = prompt_manager.get("memory", "extractor")
-        prompt = template.format(user_input=user_input)
+        sys_template = prompt_manager.get("memory", "extractor")
         
         try:
             # Extract memory fact using LLM with fallback support
-            response = await self.llm.ainvoke([SystemMessage(content=prompt)])
+            messages = [
+                SystemMessage(content=sys_template),
+                HumanMessage(content=f"用户的话：\n<user_input>\n{user_input}\n</user_input>")
+            ]
+            response = await self.llm.ainvoke(messages)
             memory_fact = response.content.strip()
             
             if memory_fact and memory_fact.lower() != "none":
