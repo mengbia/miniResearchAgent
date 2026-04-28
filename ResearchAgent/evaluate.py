@@ -6,76 +6,85 @@ import os
 from pathlib import Path
 from typing import List, Dict, Any
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
 from core.llm import get_llm
 from agents.chat_agent import normal_chat_agent
 
 judge_llm = get_llm()
 
-# Gold Standard Dataset for evaluation
-ANTHROPIC_EVAL_DATASET = [
+class EvaluationResult(BaseModel):
+    score: float = Field(description="Score between 0.0 and 1.0")
+    reason: str = Field(description="Brief justification for the score")
+
+# Expanded dataset for robust evaluation
+EVAL_DATASET = [
     {
         "id": "eval_01_chit_chat",
         "input": "Hello, I am a new developer.",
-        "expected_trajectory": [], 
+        "expected_tools": [], 
         "rubric": "Response must be friendly, brief, and welcoming. Do not invent unprovided information."
     },
     {
-        "id": "eval_02_tool_selection",
+        "id": "eval_02_local_file_listing",
         "input": "Which files have been uploaded to the system?",
-        "expected_trajectory": ["list_local_files"],
-        "rubric": "Response must accurately list the filenames returned by the tool without omissions or hallucinations."
+        "expected_tools": ["list_local_files"],
+        "rubric": "Response must accurately list the filenames returned by the tool."
     },
     {
-        "id": "eval_03_deep_read",
+        "id": "eval_03_document_summary",
         "input": "Summarize the core conclusions of the .txt files in the knowledge base.",
-        "expected_trajectory": ["read_full_document"],
-        "rubric": "Response must be an objective summary based on file content, clearly structured, and free of hallucinations."
+        "expected_tools": ["read_full_document"],
+        "rubric": "Response must be an objective summary based on file content."
+    },
+    {
+        "id": "eval_04_identity_check",
+        "input": "Who am I?",
+        "expected_tools": [],
+        "rubric": "Response must state that the AI does not have personal memory of the user unless provided."
+    },
+    {
+        "id": "eval_05_web_search",
+        "input": "What is the latest news about solid-state batteries?",
+        "expected_tools": ["tavily_search_results_json"],
+        "rubric": "Response must contain recent factual information."
     }
 ]
 
-async def rubric_based_judge(query: str, response: str, rubric: str) -> dict:
-    """Evaluates agent responses using an LLM based on a provided rubric."""
-    judge_prompt = f"""You are an expert grading assistant.
-Evaluate the AI's response based strictly on the provided rubric.
-
-[User Input]: {query}
-[AI Response]: {response}
-[Grading Rubric]: {rubric}
-
-Provide your evaluation as a JSON object with two keys:
-- "pass": boolean (true if it meets the rubric, false otherwise)
-- "reason": string (brief justification)
-"""
-    try:
-        result = await judge_llm.ainvoke([SystemMessage(content=judge_prompt)])
-        
-        content = result.content.strip()
-        if content.startswith("```json"): 
-            content = content[7:-3]
-            
-        return json.loads(content)
-    except Exception as e:
-        print(f"  [Judge Parsing Failed]: {e}")
-        return {"pass": False, "reason": "Judge parsing failed"}
-
-async def run_anthropic_evals():
-    print("Starting Anthropic evaluation engine...\n" + "="*50)
+async def evaluate_metric(query: str, response: str, metric_type: str, context: str = "") -> dict:
+    grader = judge_llm.with_structured_output(EvaluationResult)
     
-    results = {"total": len(ANTHROPIC_EVAL_DATASET), "trajectory_pass": 0, "output_pass": 0}
+    if metric_type == "relevance":
+        prompt = f"Assess the relevance of the response to the query. Score 1.0 if perfectly relevant, 0.0 if completely irrelevant.\nQuery: {query}\nResponse: {response}"
+    elif metric_type == "faithfulness":
+        prompt = f"Assess if the response contains hallucinations. Score 1.0 if completely faithful and factual, 0.0 if hallucinated or fabricated.\nQuery: {query}\nResponse: {response}"
+    elif metric_type == "rubric":
+        prompt = f"Assess if the response meets the rubric. Score 1.0 if it strictly meets it, 0.0 if not.\nQuery: {query}\nResponse: {response}\nRubric: {context}"
+    else:
+        return {"score": 0.0, "reason": "Unknown metric"}
+
+    try:
+        res = await grader.ainvoke([HumanMessage(content=prompt)])
+        return {"score": res.score, "reason": res.reason}
+    except Exception as e:
+        return {"score": 0.0, "reason": f"Evaluation error: {str(e)}"}
+
+async def run_evaluations():
+    print("Starting Automated RAGAS-style Evaluation Pipeline...")
+    
+    results_summary = {
+        "total_cases": len(EVAL_DATASET),
+        "avg_relevance": 0.0,
+        "avg_faithfulness": 0.0,
+        "avg_rubric_score": 0.0,
+        "details": []
+    }
     
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    report_lines = [
-        f"# Agent Evaluation Report",
-        f"**Generated at**: {current_time}",
-        f"**Total Test Cases**: {results['total']}",
-        "\n---",
-        "## Detailed Test Results\n"
-    ]
-
-    for idx, test in enumerate(ANTHROPIC_EVAL_DATASET):
-        print(f"\n[{idx+1}/{results['total']}] Running evaluation: {test['id']}")
+    
+    for idx, test in enumerate(EVAL_DATASET):
+        print(f"\nProcessing case [{idx+1}/{len(EVAL_DATASET)}]: {test['id']}")
         
-        state = {"messages": [HumanMessage(content=test['input'])]}
+        state = {"messages": [HumanMessage(content=test['input'])], "current_route": "", "search_keywords": []}
         start_time = time.time()
         
         actual_trajectory = []
@@ -91,75 +100,61 @@ async def run_anthropic_evals():
                     if isinstance(chunk, str): 
                         final_response += chunk
         except Exception as e:
-            print(f"  Execution error: {e}")
             final_response = f"Execution error: {e}"
             
         latency = time.time() - start_time
         
-        traj_passed = (actual_trajectory == test["expected_trajectory"])
-        if traj_passed: 
-            results["trajectory_pass"] += 1
-            
-        eval_result = await rubric_based_judge(test["input"], final_response, test["rubric"])
-        if eval_result.get("pass"): 
-            results["output_pass"] += 1
-            
+        # Concurrent evaluation of multiple metrics
+        eval_tasks = [
+            evaluate_metric(test["input"], final_response, "relevance"),
+            evaluate_metric(test["input"], final_response, "faithfulness"),
+            evaluate_metric(test["input"], final_response, "rubric", test["rubric"])
+        ]
+        relevance_res, faith_res, rubric_res = await asyncio.gather(*eval_tasks)
+        
+        # Check trajectory
+        traj_passed = all(tool in actual_trajectory for tool in test["expected_tools"])
+        
+        case_result = {
+            "id": test["id"],
+            "input": test["input"],
+            "latency": round(latency, 2),
+            "trajectory_passed": traj_passed,
+            "actual_tools": actual_trajectory,
+            "metrics": {
+                "relevance": relevance_res,
+                "faithfulness": faith_res,
+                "rubric_compliance": rubric_res
+            }
+        }
+        results_summary["details"].append(case_result)
+        
         print(f"  Latency: {latency:.2f}s")
-        print(f"  Trajectory Validation: {'PASS' if traj_passed else 'FAIL'} (Expected: {test['expected_trajectory']}, Actual: {actual_trajectory})")
-        print(f"  Output Validation: {'PASS' if eval_result.get('pass') else 'FAIL'}")
-        print(f"  Reasoning: {eval_result.get('reason')}")
+        print(f"  Relevance Score: {relevance_res['score']}")
+        print(f"  Faithfulness Score: {faith_res['score']}")
+        print(f"  Rubric Score: {rubric_res['score']}")
 
-        report_lines.extend([
-            f"### Test Case [{idx+1}/{results['total']}]: `{test['id']}`",
-            f"- **Input**: {test['input']}",
-            f"- **Expected Trajectory**: `{test['expected_trajectory']}`",
-            f"- **Actual Trajectory**: `{actual_trajectory}`",
-            f"- **Trajectory Validation**: {'PASS' if traj_passed else 'FAIL'}",
-            f"- **Output Validation**: {'PASS' if eval_result.get('pass') else 'FAIL'}",
-            f"- **Reasoning**: {eval_result.get('reason')}",
-            f"- **Latency**: {latency:.2f}s",
-            "\n"
-        ])
+    # Calculate averages
+    if results_summary["total_cases"] > 0:
+        results_summary["avg_relevance"] = sum(r["metrics"]["relevance"]["score"] for r in results_summary["details"]) / results_summary["total_cases"]
+        results_summary["avg_faithfulness"] = sum(r["metrics"]["faithfulness"]["score"] for r in results_summary["details"]) / results_summary["total_cases"]
+        results_summary["avg_rubric_score"] = sum(r["metrics"]["rubric_compliance"]["score"] for r in results_summary["details"]) / results_summary["total_cases"]
 
     print("\n" + "="*50)
-    print(f"Evaluation Summary: Trajectory Accuracy {results['trajectory_pass']}/{results['total']} | Output Compliance {results['output_pass']}/{results['total']}")
+    print("Evaluation Summary:")
+    print(f"Average Relevance: {results_summary['avg_relevance']:.2f}")
+    print(f"Average Faithfulness: {results_summary['avg_faithfulness']:.2f}")
+    print(f"Average Rubric Score: {results_summary['avg_rubric_score']:.2f}")
     
-    report_lines.extend([
-        "---",
-        "## Evaluation Summary",
-        f"- **Trajectory Accuracy**: {results['trajectory_pass']} / {results['total']}",
-        f"- **Output Compliance**: {results['output_pass']} / {results['total']}",
-        ""
-    ])
-
-    if results['trajectory_pass'] == results['total'] and results['output_pass'] == results['total']:
-        conclusion = "Conclusion: All tests passed. The Agent meets the deployment standards."
-        print(conclusion)
-    else:
-        conclusion = "Conclusion: Optimization required. Please review the failed cases and adjust system prompts or tool descriptions."
-        print(conclusion)
-    
-    report_lines.append(conclusion)
-
+    # Save results
     output_dir = Path("evaluation_result")
     output_dir.mkdir(parents=True, exist_ok=True)
+    report_path = output_dir / f"eval_report_{int(time.time())}.json"
     
-    base_filename = "evaluation_report"
-    extension = ".md"
-    
-    report_path = output_dir / f"{base_filename}{extension}"
-    
-    counter = 1
-    while report_path.exists():
-        report_path = output_dir / f"{base_filename}_{counter}{extension}"
-        counter += 1
-
-    try:
-        with open(report_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(report_lines))
-        print(f"\nFinal evaluation report saved locally: {report_path.resolve()}")
-    except Exception as e:
-        print(f"\nFailed to save report locally: {e}")
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(results_summary, f, ensure_ascii=False, indent=2)
+        
+    print(f"\nQuantified evaluation report saved locally: {report_path.resolve()}")
 
 if __name__ == "__main__":
-    asyncio.run(run_anthropic_evals())
+    asyncio.run(run_evaluations())
