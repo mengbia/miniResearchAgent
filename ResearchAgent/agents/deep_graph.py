@@ -235,7 +235,7 @@ async def reviewer_node(state: AgentState):
 def review_router(state: AgentState) -> str:
     loop_count = state.get("loop_count", 0)
     last_msg = state.get("messages", [])[-1].content if state.get("messages") else ""
-    if "打回理由" in last_msg and loop_count <= 2:
+    if "Reviewer instruction for next iteration" in last_msg and loop_count <= 2:
         return "planner"
     return "end"
 
