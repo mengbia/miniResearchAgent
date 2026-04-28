@@ -49,8 +49,9 @@ structured_router = router_llm.with_structured_output(RouteDecision)
 
 async def retrieve_memory_node(state: AgentState):
     """Retrieves long-term memory to decouple retrieval from business logic nodes."""
+    import asyncio
     user_query = state["messages"][-1].content
-    relevant_memories = user_memory.retrieve_memory(user_query)
+    relevant_memories = await asyncio.to_thread(user_memory.retrieve_memory, user_query)
     logger.info("[Memory] Long-term memory retrieval complete.")
     return {"context_memory": relevant_memories}
 

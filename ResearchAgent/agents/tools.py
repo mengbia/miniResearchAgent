@@ -1,10 +1,12 @@
 from langchain_tavily import TavilySearch
 from core.config import TAVILY_API_KEY
 from langchain_core.tools import tool
-
+from langchain_community.utilities import ArxivAPIWrapper
+import pandas as pd
 import os
 
 os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 
 def get_web_search_tool(max_results: int = 4):
     """

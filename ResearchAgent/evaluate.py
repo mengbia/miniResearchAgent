@@ -54,11 +54,11 @@ async def evaluate_metric(query: str, response: str, metric_type: str, context: 
     grader = judge_llm.with_structured_output(EvaluationResult)
     
     if metric_type == "relevance":
-        prompt = f"Assess the relevance of the response to the query. Score 1.0 if perfectly relevant, 0.0 if completely irrelevant.\nQuery: {query}\nResponse: {response}"
+        prompt = f"Assess the relevance of the response to the query. Score 1.0 if perfectly relevant, 0.0 if completely irrelevant. You must return the evaluation in JSON format.\nQuery: {query}\nResponse: {response}"
     elif metric_type == "faithfulness":
-        prompt = f"Assess if the response contains hallucinations. Score 1.0 if completely faithful and factual, 0.0 if hallucinated or fabricated.\nQuery: {query}\nResponse: {response}"
+        prompt = f"Assess if the response contains hallucinations. Score 1.0 if completely faithful and factual, 0.0 if hallucinated or fabricated. You must return the evaluation in JSON format.\nQuery: {query}\nResponse: {response}"
     elif metric_type == "rubric":
-        prompt = f"Assess if the response meets the rubric. Score 1.0 if it strictly meets it, 0.0 if not.\nQuery: {query}\nResponse: {response}\nRubric: {context}"
+        prompt = f"Assess if the response meets the rubric. Score 1.0 if it strictly meets it, 0.0 if not. You must return the evaluation in JSON format.\nQuery: {query}\nResponse: {response}\nRubric: {context}"
     else:
         return {"score": 0.0, "reason": "Unknown metric"}
 
@@ -96,8 +96,9 @@ async def run_evaluations():
                 if kind == "on_tool_start":
                     actual_trajectory.append(event.get("name"))
                 elif kind == "on_chat_model_stream":
+                    node_name = event.get("metadata", {}).get("langgraph_node", "")
                     chunk = event["data"]["chunk"].content
-                    if isinstance(chunk, str): 
+                    if isinstance(chunk, str) and node_name != "router": 
                         final_response += chunk
         except Exception as e:
             final_response = f"Execution error: {e}"
