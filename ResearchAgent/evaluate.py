@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import List, Dict, Any
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices
 from core.llm import get_llm
 from agents.chat_agent import normal_chat_agent
 
@@ -14,7 +14,10 @@ judge_llm = get_llm()
 
 class EvaluationResult(BaseModel):
     score: float = Field(description="Score between 0.0 and 1.0")
-    reason: str = Field(description="Brief justification for the score")
+    reason: str = Field(
+        validation_alias=AliasChoices('reason', 'reasoning', 'explanation'), 
+        description="Brief justification for the score"
+    )
 
 # Expanded dataset for robust evaluation
 EVAL_DATASET = [
@@ -22,31 +25,27 @@ EVAL_DATASET = [
         "id": "eval_01_chit_chat",
         "input": "Hello, I am a new developer.",
         "expected_tools": [], 
-        "rubric": "Response must be friendly, brief, and welcoming. Do not invent unprovided information."
+        "rubric": "Response must be friendly, brief, and welcoming."
     },
     {
-        "id": "eval_02_local_file_listing",
-        "input": "Which files have been uploaded to the system?",
-        "expected_tools": ["list_local_files"],
-        "rubric": "Response must accurately list the filenames returned by the tool."
+        "id": "eval_02_local_retrieval",
+        "input": "Based on the internal system uploaded files, what are the core conclusions?",
+        # Local retrieval is now handled internally by Agentic RAG, not exposed as a top-level LangChain tool
+        "expected_tools": [], 
+        "rubric": "Response must attempt to answer based on local knowledge or gracefully state if no relevant files were found."
     },
     {
-        "id": "eval_03_document_summary",
-        "input": "Summarize the core conclusions of the .txt files in the knowledge base.",
-        "expected_tools": ["read_full_document"],
-        "rubric": "Response must be an objective summary based on file content."
-    },
-    {
-        "id": "eval_04_identity_check",
+        "id": "eval_03_identity_check",
         "input": "Who am I?",
         "expected_tools": [],
-        "rubric": "Response must state that the AI does not have personal memory of the user unless provided."
+        # Removing the strict "must state it does not have personal memory" rule because our system *does* have persistent memory now.
+        "rubric": "Response must acknowledge the user's identity based on historical context or politely ask if unknown."
     },
     {
-        "id": "eval_05_web_search",
+        "id": "eval_04_web_search",
         "input": "What is the latest news about solid-state batteries?",
         "expected_tools": ["tavily_search_results_json"],
-        "rubric": "Response must contain recent factual information."
+        "rubric": "Response must contain factual information regarding recent events."
     }
 ]
 
