@@ -116,15 +116,22 @@ async def main():
                             kind = event["event"]
                             node_name = event.get("metadata", {}).get("langgraph_node", "")
                             
+                            if kind == "on_tool_start":
+                                print(f"\n\033[94m   [Tool executing: {event.get('name', 'Unknown Tool')}]\033[0m", end="")
+                            
                             if kind == "on_chain_end" and node_name == "planner":
                                 print("\n   [Plan generated, awaiting approval]...", end="\n   ")
                             elif kind == "on_chain_start" and node_name in ["web_specialist", "arxiv_specialist", "data_specialist", "local_specialist"]:
                                 print(f"\n   [{node_name} executing retrieval]...", end="\n   ")
-                            elif kind == "on_chat_model_stream" and node_name == "writer":
-                                chunk = event["data"]["chunk"].content
-                                if isinstance(chunk, str):
-                                    print(chunk, end="", flush=True)
-                                    final_answer += chunk
+                            elif kind == "on_chat_model_stream" and node_name in ["planner", "writer", "reviewer"]:
+                                chunk = event.get("data", {}).get("chunk")
+                                if chunk and hasattr(chunk, "content") and isinstance(chunk.content, str):
+                                    text_content = chunk.content
+                                    if node_name == "writer":
+                                        print(text_content, end="", flush=True)
+                                        final_answer += text_content
+                                    else:
+                                        print(f"\033[90m{text_content}\033[0m", end="", flush=True)
 
                         paused_state = await persistent_graph.aget_state(run_config)
                         
