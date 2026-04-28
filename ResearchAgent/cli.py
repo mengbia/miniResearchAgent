@@ -81,10 +81,15 @@ async def main():
                     if kind == "on_tool_start":
                         print(f"\n   [Tool call: {event['name']}]...", end="\n   ")
                     elif kind == "on_chat_model_stream":
+                        node_name = event.get("metadata", {}).get("langgraph_node", "")
                         chunk = event.get("data", {}).get("chunk")
                         if chunk and hasattr(chunk, "content") and isinstance(chunk.content, str):
-                            print(chunk.content, end="", flush=True)
-                            final_answer += chunk.content
+                            if node_name == "router":
+                                # Stream thinking in grey
+                                print(f"\033[90m{chunk.content}\033[0m", end="", flush=True)
+                            else:
+                                print(chunk.content, end="", flush=True)
+                                final_answer += chunk.content
 
             elif mode == "deep":
                 thread_id = "human_in_loop_test_01"

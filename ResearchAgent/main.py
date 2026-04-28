@@ -145,10 +145,9 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                                 yield f"data: {json.dumps({'type': 'plan_created', 'content': plan_data}, ensure_ascii=False)}\n\n"
                                 
                             elif kind == "on_chain_start" and node_name in ["web_specialist", "arxiv_specialist", "data_specialist", "local_specialist"]:
-                                yield f"data: {json.dumps({'type': 'tool_start', 'content': {'input': f'Agent {node_name} is searching...'}}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'thinking', 'content': f'[{node_name}] 正在执行检索...\n'}, ensure_ascii=False)}\n\n"
                                 
                             elif kind == "on_chain_end" and node_name in ["web_specialist", "arxiv_specialist", "data_specialist", "local_specialist"]:
-                                yield f"data: {json.dumps({'type': 'tool_end'})}\n\n"
                                 sources_data = event["data"]["output"].get("sources", [])
                                 if sources_data:
                                     yield f"data: {json.dumps({'type': 'sources', 'content': sources_data}, ensure_ascii=False)}\n\n"
@@ -157,6 +156,11 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                                 chunk = event["data"]["chunk"].content
                                 if chunk:
                                     yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
+                                    
+                            elif kind == "on_chat_model_stream" and node_name == "reviewer":
+                                chunk = event["data"]["chunk"].content
+                                if chunk:
+                                    yield f"data: {json.dumps({'type': 'thinking', 'content': chunk}, ensure_ascii=False)}\n\n"
 
                         paused_state = await persistent_graph.aget_state(run_config)
                         
@@ -167,9 +171,9 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                         
                         if loop_count > 0:
                             # Automatic continuation after reviewer round
-                            notification_text = f'\n\n> System Notification: Reviewer round {loop_count} requested revisions. Optimizing and continuing...\n\n'
+                            notification_text = f'\n[System] 审查官要求第 {loop_count} 轮修改，正在补充检索...\n'
                             # 生成 JSON 字符串
-                            json_str = json.dumps({'type': 'text', 'content': notification_text}, ensure_ascii=False)
+                            json_str = json.dumps({'type': 'thinking', 'content': notification_text}, ensure_ascii=False)
                             # 最后通过 yield 输出，用纯粹的变量替换
                             yield f"data: {json_str}\n\n"
                             payload = None
