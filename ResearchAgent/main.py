@@ -78,8 +78,8 @@ async def upload_document(file: UploadFile = File(...)):
         return {"status": "success", "message": f"File {file.filename} processed successfully. The agent can now reference it."}
 
     except Exception as e:
-        print(f"File upload failed: {e}")
-        return {"status": "error", "message": f"Upload failed: {str(e)}"}
+        logger.exception(f"File upload failed: {str(e)}")
+        return {"status": "error", "message": "文件处理失败，请稍后重试。"}
 
 
 @app.post("/api/chat")
