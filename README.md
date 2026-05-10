@@ -1,83 +1,134 @@
 # 🚀 Mini Deep Research Agent
-This project is a **Hybrid RAG Dual-State Agent**. It combines a local private knowledge base (ChromaDB) with a global web search engine (Tavily), powered by Qwen3-max and LangGraph. It supports two independent workflows: lightweight daily chat and heavy-duty deep research.
 
-## ✨ Core Features
+[![Next.js](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js)](https://nextjs.org/)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-v0.111-green?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-latest-orange?style=flat-square)](https://langchain-ai.github.io/langgraph/)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
-- 🎨 **Modern Geek-style Interaction (Modern UI/UX)**: Responsive minimal interface built with Next.js and Tailwind CSS, supporting seamless light/dark theme switching for an immersive experience comparable to premium native applications.
-- 🌊 **Full-Link Streaming Visualization**: Deeply parses the backend SSE protocol, delivering smooth typewriter-style text output while dynamically rendering the Agent’s underlying reasoning trajectory (including task breakdown progress bars and loading animations for local tool calls).
-- 🏷️ **Dual-Source Precise Citation & Source Display**: Unique citation bubble component that clearly isolates hybrid retrieval results, accurately marking `[Web]` external webpage links and `[Internal Private Library]` local document sources to eliminate LLM hallucinations.
-- 📦 **Robust Global State Management**: Lightweight state management with Zustand, perfectly supporting smooth scrolling for long conversations, on-demand generation interruption (Stop button), one-click regeneration, and seamless hot switching between dual modes (Chat / Deep Research).
-- 📎 **One-Click Knowledge Base Mounting**: Highly customized hidden file upload component supporting one-click seamless upload of `.pdf`, `.txt`, `.md`, and `.docx` files, with real-time feedback on asynchronous parsing and vectorized storage status.
-- 🧠 **Dual-State Intelligent Routing**: Backend allocates computing power on demand. Normal mode autonomously selects local tools via the Tool-Calling mechanism for second-level response; Deep Research mode handles complex topics via a LangGraph multi-node pipeline (Planner -> Worker -> Writer).
-- 🔍 **Hybrid Dual-Engine Concurrent Search**: Seamlessly integrates Tavily real-time web search and ChromaDB local private data retrieval, with true concurrent queries implemented via an `asyncio.gather` coroutine pool at the Worker node to eliminate thread blocking.
-- ⚡ **MD5 High-Speed Deduplication Engine**: Content-addressable MD5 hash duplicate checking prior to vector database storage, accurately blocking duplicate files, reducing token consumption, preventing data redundancy, and enabling "second upload" for large files.
-- 🛠️ **Observability & Evals**: Built-in non-intrusive, decoupled underlying log tracking system (generating standard `.log` persistent files), plus an Anthropic-standard automated end-to-end LLM-as-a-Judge evaluation script (`evaluate.py`).
+> **A Hybrid RAG Dual-State Agent.** Seamlessly combining local private knowledge (ChromaDB) with global web intelligence (Tavily), powered by advanced LLMs (Qwen/OpenAI) and LangGraph orchestration.
 
 ---
 
-## 📦 Environment Setup & Dependency Installation
-Ensure **Python 3.10+** and **Node.js 18+** are installed on your machine.
+## 🌟 Key Features
 
-### 1. Backend Dependencies (Python)
-Navigate to the backend directory `ResearchAgent` and install core packages:
-```bash
-pip install -r requirement.txt
-```
-*(Note: This project uses `dashscope` to access Alibaba Cloud's Qwen model and the `text-embedding-v2` embedding model)*
+### 🎨 Modern Interaction
+- **Geek-Style UI/UX**: A responsive, minimal interface built with **Next.js 15** and **Tailwind CSS 4**.
+- **Dark/Light Mode**: Seamless theme switching for a premium native app feel.
+- **Streaming Visualization**: Real-time SSE parsing with typewriter effects and dynamic reasoning trajectory rendering.
 
-### 2. Frontend Dependencies (Node.js)
-Navigate to the frontend directory `minideepResearch` and install dependencies:
-```bash
-npm install
+### 🧠 Intelligent Core
+- **Dual-State Routing**: 
+    - **Chat Mode**: Lightweight, second-level responses using local tools.
+    - **Deep Research**: Heavy-duty multi-node pipeline (**Planner → Worker → Writer**) via LangGraph.
+- **Hybrid Search**: Concurrent execution of **Tavily** (Web) and **ChromaDB** (Local) using `asyncio` for zero blocking.
+- **Smart Citation**: Transparently distinguishes between `[Web]` and `[Private Library]` sources to eliminate hallucinations.
+
+### 🛠️ Data & Engineering
+- **One-Click Mounting**: Support for `.pdf`, `.txt`, `.md`, and `.docx` with real-time vectorization feedback.
+- **MD5 Deduplication**: Content-addressable hashing to prevent redundant storage and save tokens.
+- **Observability**: Decoupled logging system and **Anthropic-standard** automated Evals (`LLM-as-a-Judge`).
+
+---
+
+## 🏗️ Architecture
+
+```mermaid
+graph TD
+    A[Frontend: Next.js] <-->|SSE / REST| B[Backend: FastAPI]
+    B <--> C{Intelligent Router}
+    C -->|Normal Mode| D[ReAct Agent]
+    C -->|Deep Mode| E[LangGraph Workflow]
+    D & E <--> F[Tools]
+    F --> G[Tavily Web Search]
+    F --> H[ChromaDB Local RAG]
+    E --> I[Multi-Agent Pipeline]
+    I -->|Planner| I1[Task Breakdown]
+    I -->|Worker| I2[Concurrent Search]
+    I -->|Writer| I3[Final Report]
 ```
 
 ---
 
-## ⚙️ Environment Configuration
-Create a `.env` file in the `ResearchAgent` root directory and fill in your API Keys:
+## 📂 Project Structure
 
-```env
-# LLM Configuration (Qwen, etc.)
-OPENAI_API_KEY="sk-your-llm-api-key"
-OPENAI_API_BASE="https://dashscope.aliyuncs.com/compatible-mode/v1" # Example for Qwen
-
-# Web Search Configuration
-TAVILY_API_KEY="tvly-your-tavily-api-key"
+```text
+.
+├── minideepResearch/       # 🎨 Frontend (Next.js 15 + Tailwind 4)
+│   ├── src/components/     # UI Components (Chat, ThinkingProcess, etc.)
+│   ├── src/app/api/        # Next.js API Routes (Proxying to Backend)
+│   └── prisma/             # Local DB Schema for Chat History
+├── ResearchAgent/          # ⚙️ Backend (Python + FastAPI + LangGraph)
+│   ├── agents/             # Agent Logic (DeepGraph, ChatAgent)
+│   ├── rag/                # RAG Engine (VectorStore, Memory)
+│   ├── core/               # Shared Utilities (LLM, Logger, Config)
+│   ├── cli.py              # Terminal Debugging Console
+│   └── main.py             # FastAPI Server Entry
+└── README.md               # You are here
 ```
 
 ---
 
-## 🚀 Startup & Deployment
-This project uses a front-end and back-end separation architecture, requiring two services to be started separately.
+## 🚀 Quick Start
 
-### Start Backend API Service
-1. Open a terminal and enter the backend directory: `cd ResearchAgent`
-2. Start the FastAPI service:
+### 1. Prerequisites
+- **Python** 3.10+
+- **Node.js** 18+ (pnpm/npm)
+
+### 2. Backend Setup
 ```bash
+cd ResearchAgent
+pip install -r requirements.txt
+
+# Configure Environment
+cp .env.example .env # Or create manually
+# Edit .env with your API keys (OPENAI_API_KEY, TAVILY_API_KEY)
+
+# Start API
 uvicorn main:app --reload
 ```
-*Service runs at `http://localhost:8000`*
 
-### Start Frontend Web Interface
-1. Open a new terminal and enter the frontend directory: `cd minideepResearch`
-2. Start the Next.js development server:
+### 3. Frontend Setup
 ```bash
+cd minideepResearch
+npm install
 npm run dev
 ```
-*Access `http://localhost:3000` in your browser to start using!*
+Visit `http://localhost:3000` to start exploring!
 
 ---
 
-## 🛠️ Developer Debugging Tool
-The backend provides a pure terminal debugging tool independent of the frontend UI, with built-in automatic log persistence.
-Run in the backend directory:
-```bash
-python terminal_chat.py
-```
-*Supports switching the Agent’s operating mode at any time by entering `/mode normal` and `/mode deep`.*
+## 🧪 Development Tools
 
-## 🧪 Automated Evaluation (LLM-as-a-Judge)
-Run the built-in Anthropic-standard evaluation script to automatically test the Agent’s tool call accuracy and hallucination rate:
+### 🖥️ Terminal Console
+Run a pure terminal-based agent for rapid debugging:
+```bash
+cd ResearchAgent
+python cli.py
+```
+*Supports `/mode normal` and `/mode deep` commands.*
+
+### 📊 Automated Evaluation
+Run the `LLM-as-a-Judge` script to benchmark tool accuracy:
 ```bash
 python evaluate.py
 ```
+
+---
+
+## 🛠️ Tech Stack
+
+- **Frontend**: Next.js 15, React 19, Tailwind CSS 4, Zustand, Framer Motion, Ant Design.
+- **Backend**: FastAPI, LangGraph, LangChain, Pydantic, SSE.
+- **Storage**: ChromaDB (Vector), SQLite (Checkpoints), PostgreSQL/Prisma (History).
+- **Search**: Tavily AI Search.
+
+---
+
+## 📄 License
+Distributed under the MIT License. See `LICENSE` for more information.
+
+---
+<p align="center">
+  Built with ❤️ for the AI community.
+</p>
