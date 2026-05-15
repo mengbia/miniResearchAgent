@@ -11,9 +11,10 @@ export interface Source {
 }
 
 export interface PlanItem {
-    id: string;
-    title: string;
-    status: "pending" | "completed" | "generating";
+    id?: string | number;
+    title?: string;
+    task?: string;
+    status?: "pending" | "completed" | "generating" | "done";
 }
 
 export interface Step {
@@ -77,6 +78,7 @@ interface ChatState {
     setSourcesForLastMessage: (sources: Source[]) => void;
     updateLastMessagePlan: (plan: PlanItem[]) => void;
     addStepToLastMessage: (step: Step) => void;
+    updateLastStepContent: (stepId: string, content: string) => void;
     completeLastStep: () => void;
 
     // --- M10 多选分享 Actions ---
@@ -172,6 +174,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
             const lastMsg = msgs[msgs.length - 1];
             const steps = lastMsg.steps || [];
             lastMsg.steps = [...steps, step];
+        }
+        return {messages: msgs};
+    }),
+
+    updateLastStepContent: (stepId, content) => set((state) => {
+        const msgs = [...state.messages];
+        if (msgs.length > 0) {
+            const lastMsg = msgs[msgs.length - 1];
+            if (lastMsg.steps) {
+                lastMsg.steps = lastMsg.steps.map((step) =>
+                    step.id === stepId ? {...step, content} : step
+                );
+            }
         }
         return {messages: msgs};
     }),

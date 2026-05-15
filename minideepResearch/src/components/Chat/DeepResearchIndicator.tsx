@@ -1,22 +1,22 @@
-"use client"; // 👈 必须加在第一行
+"use client";
 
 import { PlanItem } from "@/store/useChatStore";
 import { CheckCircle2, Circle, Loader2, ListTodo } from "lucide-react";
 import { useState } from "react";
 
+const isCompleted = (item: PlanItem) => item.status === "done" || item.status === "completed";
+
 export default function DeepResearchIndicator({ plan }: { plan: PlanItem[] }) {
-  // 默认展开，但用户可以折叠
   const [isExpanded, setIsExpanded] = useState(true);
 
   if (!plan || plan.length === 0) return null;
 
-  const completedCount = plan.filter((p) => p.status === "done").length;
+  const completedCount = plan.filter(isCompleted).length;
   const totalCount = plan.length;
   const isAllDone = completedCount === totalCount;
 
   return (
     <div className="mb-4 rounded-xl border border-purple-100 dark:border-purple-900/50 bg-purple-50/50 dark:bg-purple-900/20 overflow-hidden">
-      {/* 标题栏 (可点击折叠) */}
       <div
         onClick={() => setIsExpanded(!isExpanded)}
         className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-purple-100/50 dark:hover:bg-purple-900/30 transition-colors"
@@ -39,34 +39,39 @@ export default function DeepResearchIndicator({ plan }: { plan: PlanItem[] }) {
         </div>
       </div>
 
-      {/* 任务列表内容 */}
       {isExpanded && (
         <div className="px-4 pb-3 space-y-2">
-          {plan.map((item) => (
-            <div key={item.id} className="flex items-start gap-2.5 text-sm">
-              <div className="mt-0.5 shrink-0">
-                {item.status === "done" ? (
-                  <CheckCircle2 className="w-4 h-4 text-green-500" />
-                ) : (
-                  // 如果是第一个 pending 的，显示转圈，后面的显示空圈
-                  item.id === completedCount + 1 ? (
+          {plan.map((item, index) => {
+            const itemId = item.id ?? index + 1;
+            const done = isCompleted(item);
+            const current = itemId === completedCount + 1;
+            const label = item.task || item.title || "";
+
+            return (
+              <div key={itemId} className="flex items-start gap-2.5 text-sm">
+                <div className="mt-0.5 shrink-0">
+                  {done ? (
+                    <CheckCircle2 className="w-4 h-4 text-green-500" />
+                  ) : current ? (
                     <Loader2 className="w-4 h-4 text-purple-600 animate-spin" />
                   ) : (
                     <Circle className="w-4 h-4 text-gray-300 dark:text-gray-600" />
-                  )
-                )}
+                  )}
+                </div>
+                <span
+                  className={
+                    done
+                      ? "text-gray-500 dark:text-gray-400 line-through"
+                      : current
+                        ? "text-purple-900 dark:text-purple-100 font-medium"
+                        : "text-gray-500 dark:text-gray-500"
+                  }
+                >
+                  {label}
+                </span>
               </div>
-              <span className={`${
-                item.status === "done" 
-                  ? "text-gray-500 dark:text-gray-400 line-through" 
-                  : item.id === completedCount + 1
-                    ? "text-purple-900 dark:text-purple-100 font-medium"
-                    : "text-gray-500 dark:text-gray-500"
-              }`}>
-                {item.task}
-              </span>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

@@ -108,14 +108,17 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
     async def agent_stream():
         try:
             if mode == "deep":
-                task_id = request.messages[0].id if (request.messages and request.messages[0].id) else "web_deep_task_01"
+                task_id = request.messages[-1].id if (request.messages and request.messages[-1].id) else str(uuid.uuid4())
                 run_config = {"configurable": {"thread_id": task_id}}
+                latest_report = ""
+                writer_buffer = ""
+                last_announced_node = ""
+                final_values = {}
+                stream_final_writer = False
+                streamed_text_to_client = False
 
                 async with AsyncSqliteSaver.from_conn_string(DB_PATH) as memory_saver:
-                    persistent_graph = workflow.compile(
-                        checkpointer=memory_saver,
-                        interrupt_after=["planner"]
-                    )
+                    persistent_graph = workflow.compile(checkpointer=memory_saver)
                     
                     current_state = await persistent_graph.aget_state(run_config)
                     
@@ -140,22 +143,63 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                             kind = event["event"]
                             node_name = event.get("metadata", {}).get("langgraph_node", "")
                             
-                            if kind == "on_chain_end" and node_name == "planner":
+                            if kind == "on_chain_start" and node_name == "planner" and last_announced_node != "planner":
+                                last_announced_node = "planner"
+                                event_data = json.dumps({"type": "thinking", "content": "[planner] 正在制定研究计划...\n"}, ensure_ascii=False)
+                                yield f"data: {event_data}\n\n"
+
+                            elif kind == "on_chain_end" and node_name == "planner" and isinstance(event["data"].get("output"), dict):
                                 plan_data = event["data"]["output"].get("plan", [])
-                                yield f"data: {json.dumps({'type': 'plan_created', 'content': plan_data}, ensure_ascii=False)}\n\n"
+                                if plan_data:
+                                    yield f"data: {json.dumps({'type': 'plan_created', 'content': plan_data}, ensure_ascii=False)}\n\n"
                                 
-                            elif kind == "on_chain_start" and node_name in ["web_specialist", "arxiv_specialist", "data_specialist", "local_specialist"]:
-                                yield f"data: {json.dumps({'type': 'thinking', 'content': f'[{node_name}] 正在执行检索...\n'}, ensure_ascii=False)}\n\n"
+                            elif kind == "on_chain_start" and node_name in ["web_specialist", "arxiv_specialist", "data_specialist", "local_specialist"] and last_announced_node != node_name:
+                                last_announced_node = node_name
+                                thinking_content = f"[{node_name}] 正在执行检索...\n"
+                                event_data = json.dumps({"type": "thinking", "content": thinking_content}, ensure_ascii=False)
+                                yield f"data: {event_data}\n\n"
                                 
-                            elif kind == "on_chain_end" and node_name in ["web_specialist", "arxiv_specialist", "data_specialist", "local_specialist"]:
+                            elif kind == "on_chain_end" and node_name in ["web_specialist", "arxiv_specialist", "data_specialist", "local_specialist"] and isinstance(event["data"].get("output"), dict):
                                 sources_data = event["data"]["output"].get("sources", [])
                                 if sources_data:
                                     yield f"data: {json.dumps({'type': 'sources', 'content': sources_data}, ensure_ascii=False)}\n\n"
+
+                            elif kind == "on_chain_start" and node_name == "filter" and last_announced_node != "filter":
+                                last_announced_node = "filter"
+                                event_data = json.dumps({"type": "thinking", "content": "[filter] 正在清洗和去重资料...\n"}, ensure_ascii=False)
+                                yield f"data: {event_data}\n\n"
+
+                            elif kind == "on_chain_start" and node_name == "writer" and last_announced_node != "writer":
+                                last_announced_node = "writer"
+                                writer_buffer = ""
+                                event_input = event.get("data", {}).get("input")
+                                current_loop_count = event_input.get("loop_count", 0) if isinstance(event_input, dict) else 0
+                                stream_final_writer = current_loop_count >= 2
+                                event_data = json.dumps({"type": "thinking", "content": "[writer] 正在撰写最终报告...\n"}, ensure_ascii=False)
+                                yield f"data: {event_data}\n\n"
                                     
                             elif kind == "on_chat_model_stream" and node_name == "writer":
                                 chunk = event["data"]["chunk"].content
                                 if chunk:
-                                    yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
+                                    if stream_final_writer:
+                                        streamed_text_to_client = True
+                                        yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
+                                    else:
+                                        writer_buffer += chunk
+
+                            elif kind == "on_chain_end" and node_name == "writer":
+                                output = event["data"].get("output")
+                                if isinstance(output, dict):
+                                    report = output.get("report", "")
+                                    if report:
+                                        latest_report = report
+                                elif writer_buffer:
+                                    latest_report = writer_buffer
+
+                            elif kind == "on_chain_start" and node_name == "reviewer" and last_announced_node != "reviewer":
+                                last_announced_node = "reviewer"
+                                event_data = json.dumps({"type": "thinking", "content": "[reviewer] 正在评估报告质量...\n"}, ensure_ascii=False)
+                                yield f"data: {event_data}\n\n"
                                     
                             elif kind == "on_chat_model_stream" and node_name == "reviewer":
                                 chunk = event["data"]["chunk"].content
@@ -163,11 +207,12 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                                     yield f"data: {json.dumps({'type': 'thinking', 'content': chunk}, ensure_ascii=False)}\n\n"
 
                         paused_state = await persistent_graph.aget_state(run_config)
+                        final_values = paused_state.values or {}
                         
                         if not paused_state.next:
                             break
                             
-                        loop_count = paused_state.values.get("loop_count", 0)
+                        loop_count = final_values.get("loop_count", 0)
                         
                         if loop_count > 0:
                             # Automatic continuation after reviewer round
@@ -182,6 +227,23 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                             # Wait for user approval of the initial plan
                             yield "data: " + json.dumps({'type': 'text', 'content': '\n\n---\n**Outline Approval Required**\nTask suspended. Please review the proposed research plan.\n- Reply "continue" or "agree" to proceed.\n- Reply "cancel" to terminate.'}, ensure_ascii=False) + "\n\n"
                             break
+
+                    final_plan = final_values.get("plan", [])
+                    if final_plan:
+                        completed_plan = []
+                        for index, item in enumerate(final_plan):
+                            completed_item = dict(item) if isinstance(item, dict) else {"title": str(item)}
+                            completed_item.setdefault("id", index + 1)
+                            completed_item["status"] = "completed"
+                            completed_plan.append(completed_item)
+                        yield f"data: {json.dumps({'type': 'plan_update', 'content': completed_plan}, ensure_ascii=False)}\n\n"
+
+                    final_report = final_values.get("report") or latest_report or writer_buffer
+                    if final_report and not streamed_text_to_client:
+                        for index in range(0, len(final_report), 32):
+                            chunk = final_report[index:index + 32]
+                            yield f"data: {json.dumps({'type': 'text', 'content': chunk}, ensure_ascii=False)}\n\n"
+                            await asyncio.sleep(0)
                             
             else:
                 state = {

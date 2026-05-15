@@ -34,7 +34,7 @@ async function main() {
     }
 
     // 如果是工具调用请求
-    if ("tool_calls" in lastMessage && lastMessage.tool_calls?.length > 0) {
+    if ("tool_calls" in lastMessage && Array.isArray(lastMessage.tool_calls) && lastMessage.tool_calls.length > 0) {
       console.log(`[正在调用工具]: ${JSON.stringify(lastMessage.tool_calls, null, 2)}`);
     }
   }

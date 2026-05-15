@@ -32,7 +32,8 @@ export default function Home() {
     deleteLastMessage,
 
     setAbortController,
-    updateLastMessagePlan
+    updateLastMessagePlan,
+    updateLastStepContent
   } = useChatStore();
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -179,15 +180,7 @@ export default function Home() {
                   });
                 }
                 accumulatedThinking += data.content;
-                // Update the step content with the thinking stream
-                const msgs = useChatStore.getState().messages;
-                const lastMsg = msgs[msgs.length - 1];
-                if (lastMsg.steps) {
-                  const step = lastMsg.steps.find(s => s.id === currentThinkingId);
-                  if (step) {
-                    step.content = accumulatedThinking;
-                  }
-                }
+                updateLastStepContent(currentThinkingId, accumulatedThinking);
               }
 
               // === 3. Tool Start ===

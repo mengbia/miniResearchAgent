@@ -1,0 +1,120 @@
+services:
+  # ---------------------------
+  # 1. PostgreSQL (关系型数据库)
+  # ---------------------------
+  postgres:
+    image: postgres:15
+    container_name: research-pg
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password123}
+      POSTGRES_DB: ${POSTGRES_DB:-deep_research}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - research-net
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-deep_research}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------
+  # 2. Redis (缓存与队列)
+  # ---------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: research-redis
+    restart: always
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - research-net
+
+  # ---------------------------
+  # 3. Minio (文件存储)
+  # ---------------------------
+  minio:
+    image: minio/minio
+    container_name: research-minio
+    restart: always
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - research-net
+
+  # ---------------------------
+  # 4. Backend (ResearchAgent)
+  # ---------------------------
+  backend:
+    build:
+      context: ./ResearchAgent
+      dockerfile: Dockerfile
+    container_name: research-backend
+    restart: always
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./ResearchAgent/.env
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password123}@postgres:5432/${POSTGRES_DB:-deep_research}
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - ./ResearchAgent/uploads:/app/uploads
+      - ./ResearchAgent/checkpoints:/app/checkpoints
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_started
+    networks:
+      - research-net
+
+  # ---------------------------
+  # 5. Frontend (minideepResearch)
+  # ---------------------------
+  frontend:
+    build:
+      context: ./minideepResearch
+      dockerfile: Dockerfile
+    container_name: research-frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-admin}:${POSTGRES_PASSWORD:-password123}@postgres:5432/${POSTGRES_DB:-deep_research}
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      backend:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    networks:
+      - research-net
+
+networks:
+  research-net:
+    driver: bridge
+
+volumes:
+  pg_data:
+  redis_data:
+  minio_data:
